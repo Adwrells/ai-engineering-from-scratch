@@ -1032,9 +1032,9 @@ npx skills add rohitg00/ai-engineering-from-scratch
 `.cursor/skills/`, `.codex/skills/`, OpenClaw's skills folder, Hermes's bundle
 path, or any SKILL.md-aware tool. One command, every agent.
 
-**The 388 lesson artifacts** (skills and prompts under `phases/**/outputs/`)
-install via `scripts/install_skills.py`. Requires cloning the repo. Supports
-tag filters, dry-runs, and per-agent layouts:
+**The lesson artifacts.** The repo ships 388 skills and 99 prompts under
+`phases/**/outputs/`; install them via `scripts/install_skills.py`. Requires
+cloning the repo. Supports tag filters, dry-runs, and per-agent layouts:
 
 ```bash
 python3 scripts/install_skills.py <target>                                 # every skill, default --layout skills (nested)

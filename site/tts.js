@@ -19,7 +19,7 @@
 
   var RATE_KEY = 'tts:rate';
   var VOICE_KEY = 'tts:voice';
-  var MAX_CHUNK = 220;
+  var MAX_CHUNK = 160;
 
   // Regions that are chrome, not content — nothing inside is ever read.
   var HARD_SKIP = [
@@ -133,7 +133,14 @@
     dragged: false,
     highlighted: null,
     utterance: null,
-    keepAlive: null,
+    // Playback health: sequence token for stale callbacks, strong refs against
+    // GC, stall counter, and the offline voice a stall fell back to.
+    seq: 0,
+    spoken: [],
+    stalls: 0,
+    idleTicks: 0,
+    forcedLocal: null,
+    watchdog: null,
   };
 
   var els = {};
@@ -343,6 +350,8 @@
   }
 
   function selectedVoice() {
+    // A voice that kept dropping has been replaced for this session.
+    if (state.forcedLocal) return state.forcedLocal;
     var wanted = lsGet(VOICE_KEY);
     var all = synth.getVoices() || [];
     if (wanted) {
@@ -434,21 +443,36 @@
       u.voice = v;
       u.lang = v.lang;
     }
+    // Callbacks from an utterance we have already moved past must not advance
+    // the queue: the watchdog can re-speak a chunk whose original is still
+    // sitting somewhere inside the engine.
+    var token = ++state.seq;
+
     u.onend = function () {
-      if (!state.playing) return;
+      if (token !== state.seq || !state.playing) return;
       state.index++;
+      state.stalls = 0;
       render();
-      speakCurrent();
+      // Calling speak() synchronously from inside onend wedges the queue in
+      // some Chromium builds; yielding first is reliable.
+      deferSpeak();
     };
     u.onerror = function (e) {
       // "interrupted"/"canceled" are the normal result of stop()/next().
       if (e && (e.error === 'interrupted' || e.error === 'canceled')) return;
-      if (!state.playing) return;
+      if (token !== state.seq || !state.playing) return;
       state.index++;
-      if (state.index < state.chunks.length) speakCurrent();
+      state.stalls = 0;
+      if (state.index < state.chunks.length) deferSpeak();
       else stop();
     };
+
     state.utterance = u;
+    // Chromium can garbage-collect an in-flight utterance and cut it off, so
+    // hold a strong reference to the recent ones.
+    state.spoken.push(u);
+    if (state.spoken.length > 8) state.spoken.shift();
+
     highlight(chunk.el);
     synth.speak(u);
   }
@@ -504,7 +528,7 @@
     hideSelectionButton();
     var sel = window.getSelection && window.getSelection();
     if (sel && sel.removeAllRanges) sel.removeAllRanges();
-    startKeepAlive();
+    startWatchdog();
     return start(false, block);
   }
 
@@ -514,13 +538,14 @@
       if (!silentIfEmpty) flash('Nothing to read on this page');
       return false;
     }
-    synth.cancel();
+    cancelSpeech();
     state.index = fromEl ? indexOfBlock(fromEl) : 0;
     state.playing = true;
     state.paused = false;
     state.waiting = false;
+    state.stalls = 0;
     setResume(true);
-    startKeepAlive();
+    startWatchdog();
     render();
     speakCurrent();
     return true;
@@ -550,8 +575,8 @@
     state.index = 0;
     state.waiting = false;
     setResume(false);
-    stopKeepAlive();
-    synth.cancel();
+    stopWatchdog();
+    cancelSpeech();
     highlight(null);
     hideSelectionButton();
     render();
@@ -629,33 +654,104 @@
     }
     state.index = next;
     state.paused = false;
-    synth.cancel();
+    cancelSpeech();
     render();
     speakCurrent();
   }
 
   /**
-   * Chromium drops long-running synthesis after ~15s of wall time. Chunking
-   * already avoids most of it; this watchdog covers the rest — but only on
-   * Chromium, since pause()/resume() is flaky elsewhere and would risk
-   * glitching playback that was working fine.
+   * cancel() does not silence the callbacks of the utterance it kills: WebKit
+   * still fires onend for a cancelled utterance, and engines that report an
+   * error without a recognised `error` string fall through the same path. Bump
+   * the sequence first so anything arriving afterwards is stale and cannot
+   * advance the queue or start a second reader.
    */
-  var isChromium = /Chrom(e|ium)|Edg\//.test(navigator.userAgent || '');
-
-  function startKeepAlive() {
-    stopKeepAlive();
-    if (!isChromium) return;
-    state.keepAlive = setInterval(function () {
-      if (!state.playing || state.paused) return;
-      if (!synth.speaking) return;
-      synth.pause();
-      synth.resume();
-    }, 10000);
+  function cancelSpeech() {
+    state.seq++;
+    synth.cancel();
   }
 
-  function stopKeepAlive() {
-    if (state.keepAlive) clearInterval(state.keepAlive);
-    state.keepAlive = null;
+  /**
+   * Hand control to the next chunk on a fresh task. Each deferral remembers
+   * the sequence it was scheduled under, so if anything else takes over in the
+   * meantime — a stall retry, a jump, a stop — this one quietly drops instead
+   * of starting a second reader.
+   */
+  function deferSpeak() {
+    var expected = state.seq;
+    setTimeout(function () {
+      if (!state.playing || state.paused) return;
+      if (state.seq !== expected) return;
+      speakCurrent();
+    }, 0);
+  }
+
+  /**
+   * Network-backed voices (Google's, and Edge's "Online (Natural)" set) can
+   * drop an utterance without ever firing onend or onerror. The queue then
+   * stalls silently while the bar still says it is reading, which is heard as
+   * "the voice stops after a few seconds".
+   *
+   * Nothing in the API reports this, so poll for it: an engine that is neither
+   * speaking nor pending, while we believe playback is running, has dropped
+   * the utterance.
+   */
+  function startWatchdog() {
+    stopWatchdog();
+    state.idleTicks = 0;
+    state.watchdog = setInterval(function () {
+      if (!state.playing || state.paused || state.waiting) return;
+      if (synth.speaking || synth.pending) {
+        state.idleTicks = 0;
+        return;
+      }
+      // Two ticks, so an ordinary gap between utterances is not read as a stall.
+      if (++state.idleTicks < 2) return;
+      state.idleTicks = 0;
+      recoverFromStall();
+    }, 400);
+  }
+
+  function stopWatchdog() {
+    if (state.watchdog) clearInterval(state.watchdog);
+    state.watchdog = null;
+  }
+
+  function recoverFromStall() {
+    state.stalls++;
+    // Give up on the fourth ignored attempt; a fifth only skips one more chunk.
+    if (state.stalls >= 4) {
+      flash('Speech engine stopped responding');
+      stop();
+      return;
+    }
+    var local = state.stalls >= 2 && !state.forcedLocal ? localVoice() : null;
+    if (local) {
+      // A cloud voice that keeps dropping will not recover on its own; move to
+      // an offline voice, which is plainer but does not cut out.
+      state.forcedLocal = local;
+      flash('Switched to ' + local.name + ' — the previous voice kept cutting out');
+    } else if (state.stalls >= 3) {
+      // Still stalling after the fallback: skip the chunk rather than retry it
+      // forever, so the rest of the article is still read.
+      state.index++;
+      if (state.index >= state.chunks.length) {
+        stop();
+        return;
+      }
+      render();
+    }
+    cancelSpeech();
+    deferSpeak();
+  }
+
+  /** Best offline voice, used when a network voice keeps dropping out. */
+  function localVoice() {
+    var all = voices();
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].localService) return all[i];
+    }
+    return null;
   }
 
   /* ------------------------------------------------------------------ ui */
@@ -910,16 +1006,18 @@
       if (state.playing) {
         // Rate only applies to a new utterance, so restart the current chunk.
         state.paused = false;
-        synth.cancel();
+        cancelSpeech();
         speakCurrent();
       }
     });
 
     els.voice.addEventListener('change', function () {
       lsSet(VOICE_KEY, els.voice.value);
+      // An explicit choice overrides the automatic offline fallback.
+      state.forcedLocal = null;
       if (state.playing) {
         state.paused = false;
-        synth.cancel();
+        cancelSpeech();
         speakCurrent();
       }
     });
@@ -1020,7 +1118,7 @@
     // Leftover utterances would keep talking over the next page; the resume
     // flag (not the audio) is what carries playback across the navigation.
     window.addEventListener('pagehide', function () {
-      synth.cancel();
+      cancelSpeech();
     });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && (state.playing || state.waiting)) stop();

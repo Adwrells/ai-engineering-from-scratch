@@ -15,6 +15,15 @@
 - Review commands, paths, network needs, secrets, and side effects before execution.
 - Choose a process, container, or microVM boundary according to the task's risk.
 
+## Before You Start
+
+This lesson has two required route edges. Complete
+[Lesson 25](../../25-skill-invocation-and-routing/) and complete
+[Lesson 15](../../15-mcp-security-tool-poisoning/) or demonstrate that you can
+separate tool poisoning and untrusted content from authority-bearing
+instructions. If Lesson 15 is missing, take that detour before continuing;
+the focused website route keeps Lesson 26 visible but reports the unmet edge.
+
 ## The Problem
 
 A code-review skill contains this instruction: "Run the project's test suite and inspect the failure." That sentence is harmless in one environment and dangerous in another.
@@ -305,10 +314,14 @@ The lab provides:
 Run the simulated policy decisions:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"
 cd phases/13-tools-and-protocols/26-skill-permissions-sandboxes-and-trust
 python3 code/main.py
 python3 -m unittest discover -s code/tests -v
 ```
+
+This block requires a local clone and resolves the repository root from any
+working directory inside that clone.
 
 The demo evaluates a read, an unapproved and approved write, a path escape, a destructive command, an untrusted network request, and an attempted policy change. The tests add secret-bearing payloads, default-port normalization, non-default-port isolation, and malformed origin-policy cases. Both paths print or assert decisions without starting a process or opening a connection.
 
@@ -317,6 +330,8 @@ The demo evaluates a read, an unapproved and approved write, a path escape, a de
 Policy review and isolation are different controls. The optional files under `code/sandbox/` run a harmless probe inside an OCI container so you can observe an enforced boundary rather than only read about one.
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"
+cd phases/13-tools-and-protocols/26-skill-permissions-sandboxes-and-trust
 docker build -f code/sandbox/Containerfile -t aiefs-skill-sandbox code/sandbox
 docker run --rm --network none --read-only --cap-drop ALL \
   --security-opt no-new-privileges --pids-limit 64 --memory 128m --cpus 0.5 \

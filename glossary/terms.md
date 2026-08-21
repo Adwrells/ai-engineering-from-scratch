@@ -333,7 +333,7 @@ The twelve categories are: Math & training; Models & inference; Data & represent
 - **Why it matters:** Its value depends on repository context, tool permissions, review boundaries, and verification, not only code generation quality.
 - **In practice:** Give the agent an issue, a scope contract, repository instructions, and a test command; review the resulting patch and evidence before accepting it.
 - **Common confusion:** A coding assistant that only suggests text is not necessarily an agent. The agent acts through tools and observes results.
-- **Learn it:** [Workbench for Real Repositories](../phases/14-agent-engineering/41-workbench-for-real-repos/)
+- **Learn it:** [Skill Discovery and Progressive Disclosure](../phases/13-tools-and-protocols/24-skill-discovery-and-progressive-disclosure/)
 - **Related terms:** Agent Harness, Repository Map, Patch, Scope Contract, Reviewer Agent
 
 ### Compensating Action
@@ -1176,11 +1176,11 @@ The twelve categories are: Math & training; Models & inference; Data & represent
 ### MCP (Model Context Protocol)
 - **Category:** Agents & tools
 - **What people say:** A standard way for AI applications to connect to tools and context.
-- **What it actually means:** An open protocol for a host to connect to servers that expose capabilities such as tools, resources, and prompts through a defined message lifecycle and transport bindings.
-- **Common confusion:** MCP standardizes capability discovery and exchange. It does not decide which tool is safe to call or grant permission by itself.
+- **What it actually means:** An open JSON-RPC protocol for a host to connect to servers that expose tools, resources, prompts, and extensions through defined request, result, discovery, and transport contracts. In revision 2026-07-28, every request carries its protocol version and client capabilities instead of relying on an initialization handshake or protocol session.
+- **Common confusion:** MCP standardizes discovery and exchange. It does not decide which tool is safe to call, grant permission, or forbid an application from using explicit state handles.
 - **Learn it:** [Model Context Protocol](../phases/11-llm-engineering/14-model-context-protocol/)
-- **Sources:** [Model Context Protocol specification](https://modelcontextprotocol.io/specification/)
-- **Related terms:** Function Calling, Tool Contract, Least Privilege
+- **Sources:** [MCP 2026-07-28 key changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+- **Related terms:** Stateless MCP, Multi Round-Trip Request (MRTR), Function Calling, Tool Contract, Least Privilege
 
 ### Membership Inference
 - **Category:** Security & governance
@@ -1274,6 +1274,17 @@ The twelve categories are: Math & training; Models & inference; Data & represent
 - **Learn it:** [MIO Any-to-Any Streaming](../phases/12-multimodal-ai/16-mio-any-to-any-streaming/)
 - **Related terms:** Modality, Vision-Language Model (VLM), Multimodal Fusion, Transformer
 - **Sources:** [Flamingo: a Visual Language Model for Few-Shot Learning](https://arxiv.org/abs/2204.14198); [Multimodal Machine Learning: A Survey and Taxonomy](https://arxiv.org/abs/1705.09406)
+
+### Multi Round-Trip Request (MRTR)
+- **Category:** Agents & tools
+- **Aliases:** MRTR
+- **What it actually means:** An MCP request pattern in which an operation returns `resultType: input_required` with one or more `inputRequests`, then the client retries the original method with `inputResponses` and the exact returned `requestState`.
+- **Why it matters:** It lets a stateless server request user, model, or root input without opening a server-initiated JSON-RPC exchange or storing protocol session state.
+- **In practice:** Return an input request from `tools/call`, collect the authorized response in the host, and retry that same tool call with a new JSON-RPC id.
+- **Common confusion:** `requestState` is untrusted round-trip data. Integrity-protect it before using it for authorization or business decisions, and do not treat it as a server-side session identifier.
+- **Learn it:** [MCP Roots and Elicitation](../phases/13-tools-and-protocols/12-mcp-roots-and-elicitation/)
+- **Related terms:** Stateless MCP, MCP (Model Context Protocol), Human-in-the-Loop (HITL), Tool Contract
+- **Sources:** [MCP Multi Round-Trip Requests](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr)
 
 ## N
 
@@ -1868,6 +1879,16 @@ The twelve categories are: Math & training; Models & inference; Data & represent
 - **Common confusion:** Speculative decoding is not ordinary model routing or unverified autocomplete. Exact variants preserve the target distribution through acceptance and correction, while approximate variants may trade that guarantee for speed.
 - **Related terms:** Autoregressive, KV Cache, Decoding Strategy, Tokens per Second (TPS)
 - **Sources:** [Fast Inference from Transformers via Speculative Decoding](https://proceedings.mlr.press/v202/leviathan23a.html)
+
+### Stateless MCP
+- **Category:** Agents & tools
+- **What it actually means:** The MCP 2026-07-28 request model in which every request carries the protocol version and client capabilities in `params._meta`, while results carry an explicit `resultType`; no protocol state is keyed by an initialization handshake, connection, or `Mcp-Session-Id`.
+- **Why it matters:** Any worker can validate and process a request from its contents and authorization context, which avoids hidden connection affinity and makes horizontal routing easier to reason about.
+- **In practice:** Implement `server/discover`, rebuild request metadata on every call, validate transport headers against the JSON-RPC body, and pass server-minted application handles as ordinary tool arguments when continuity is required.
+- **Common confusion:** Stateless MCP removes protocol sessions, not application state, transport connections, streaming responses, tasks, or explicit handles.
+- **Learn it:** [MCP Fundamentals](../phases/13-tools-and-protocols/06-mcp-fundamentals/)
+- **Related terms:** MCP (Model Context Protocol), Multi Round-Trip Request (MRTR), Tool Contract, Idempotency
+- **Sources:** [MCP 2026-07-28 key changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog); [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 
 ### Stochastic Gradient Descent (SGD)
 - **Category:** Math & training

@@ -47,6 +47,17 @@ A task id is explicit application state:
 
 This is operationally different from hidden state attached to a connection.
 
+Keep four lifetimes separate:
+
+| State | Lifetime | Where it belongs |
+|---|---|---|
+| Protocol metadata | One request | `params._meta`, validated again on every call |
+| Transport work | One stdio request or HTTP response | In-flight coordinator with a bounded deadline |
+| MRTR continuation | One retry sequence | Integrity-protected `requestState`, plus replay controls when needed |
+| Durable task | Across requests, replicas, restarts, and reconnects | Shared application store keyed by an authorized `taskId` |
+
+Moving a task record into process memory does not make MCP stateful. It makes the application unreliable. The protocol stays stateless, but a later `tasks/get` routed to another replica cannot recover the record. Persist before returning the handle, then make every task method resolve the same shared record under tenant and principal checks.
+
 ## Capability Negotiation
 
 The client advertises support on every eligible request:
@@ -336,6 +347,10 @@ The lesson worker honors cancellation immediately, making repeated calls idempot
 
 Do not use `notifications/cancelled` to cancel a task. That notification belongs to request cancellation, not durable Tasks.
 
+The distinction matters at the routing boundary. Request cancellation targets one in-flight JSON-RPC operation or its request-scoped HTTP response. If `tools/call` has already returned `resultType: "task"`, that request is complete and closing its transport cannot name or stop the durable job. `tasks/cancel` is a new authorized RPC. It carries `params.taskId`, mirrors that id in `Mcp-Name`, resolves the task's owning backend, records cooperative cancellation intent, and returns an acknowledgement without claiming the worker has stopped.
+
+A gateway must therefore keep request coordinators and task routes in different tables. The request table can disappear when the response finishes. The task route must survive until terminal state and retention expiry. [Lesson 29: MCP Reliability, Cancellation, and Flow Control](../../29-mcp-reliability-cancellation-and-flow-control/docs/en.md) builds the race, timeout, idempotency, backpressure, and retry rules for both paths.
+
 ## Optional Notifications
 
 Polling is the baseline. A client that wants push updates sends `subscriptions/listen` with task ids. For Streamable HTTP, this is a POST whose response is a request-scoped SSE stream. There is no standalone GET event stream and no protocol session to keep alive.
@@ -449,6 +464,5 @@ The 2025-11-25 experimental surface used client-requested task augmentation, `ta
 ## Further Reading
 
 - [Official MCP Tasks extension](https://tasks.extensions.modelcontextprotocol.io/specification/draft/tasks)
-- [MCP 2026-07-28 Extensions](https://modelcontextprotocol.io/specification/2026-07-28/basic/extensions)
 - [MCP 2026-07-28 Multi Round-Trip Requests](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr)
 - [MCP 2026-07-28 Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)

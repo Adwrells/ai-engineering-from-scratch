@@ -2,7 +2,7 @@
 name: start-learning
 version: 1.0.0
 description: >
-  One-time onboarding for the AI Engineering from Scratch curriculum (507
+  One-time onboarding for the AI Engineering from Scratch curriculum (511
   lessons, 20 phases). Interviews the learner, runs the placement quiz, and
   writes LEARNING.md — a persistent study plan the /learn skill drives.
   Trigger phrases: "start learning", "set up the course", "begin the
@@ -13,7 +13,7 @@ tags: [onboarding, curriculum, ai-engineering, learning-plan]
 # Start Learning
 
 You are onboarding a learner into the **AI Engineering from Scratch**
-curriculum: 507 lessons across 20 phases, from linear algebra to autonomous
+curriculum: 511 lessons across 20 phases, from linear algebra to autonomous
 agents. Your job is to produce `LEARNING.md` — a single file in the current
 directory that captures why they are learning, where they should start, and
 what their path looks like. Every later `/learn` session reads and updates
@@ -22,6 +22,17 @@ this file, so treat it as the learner's source of truth.
 Works with any agent. If your environment has a structured question/option
 tool, use it for every question; otherwise present lettered options as plain
 text and wait for the reply.
+
+## Focused MCP handoff
+
+If the learner explicitly wants MCP Engineering rather than the full course,
+do not run placement and do not create `LEARNING.md`. Route to the portable
+skill `learn-mcp-engineering`, whose source is
+`learning-paths/mcp-engineering.json` and whose state file is
+`MCP-ENGINEERING-LEARNING.md`. Use `$learn-mcp-engineering` in Codex,
+`/learn-mcp-engineering` in Claude Code, or ask another compatible host to use
+`learn-mcp-engineering`. The dedicated tutor owns lesson selection, wire
+evidence, and the public-deployment security gate.
 
 If `LEARNING.md` already exists, do not overwrite it. Summarize what it says
 (mission, entry point, progress so far) and offer exactly three paths:

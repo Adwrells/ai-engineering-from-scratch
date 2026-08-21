@@ -16,6 +16,7 @@
 - Validate RFC 9207 `iss`, key registrations by authorization-server issuer, and key resource-bound tokens by issuer plus resource.
 - Cache and refresh JWKS keys on a schedule so signature verification survives key roll-over.
 - Pin tokens to a single MCP resource using RFC 8707 resource indicators and refuse confused-deputy reuse.
+- Choose JWT validation or token introspection, define revocation freshness, and fail safely when identity dependencies are unavailable.
 - Separate the authorization server, resource server, and client so each enforces only its own checks.
 - Audit an authorization server against a deployment checklist and refuse unsafe enrollment or token reuse.
 
@@ -30,6 +31,20 @@ The second gap is key rotation. JWT validation depends on the authorization serv
 The third gap is audience binding. Lesson 16 introduced RFC 8707 resource indicators. In production, that indicator becomes a hard claim check on every request. The MCP server compares `token.aud` against its own canonical resource URL and rejects mismatches with HTTP 401. This is the only defense against an upstream MCP server (or a malicious client holding a token meant for one server) replaying that token against another server in the same trust mesh.
 
 This lesson maps each gap onto a concrete piece of the surface. The metadata document is an HTTP endpoint. JWKS cache refresh is a scheduled job plus a key-value cache. JWT validation is a routine the resource server runs before dispatching any tool. Keep the three roles separate and each one enforces only the checks it owns: the authorization server issues and rotates keys, the resource server caches and validates, the client discovers and enrolls.
+
+## Scope: Production Enforcement After Lesson 16
+
+[Lesson 16: MCP Security with OAuth 2.1](../../16-mcp-security-oauth-2-1/docs/en.md) owns the authorization-code state machine, PKCE, protected-resource discovery, resource indicators, and scope decisions. This lesson does not define a second OAuth flow. It starts after those contracts exist and asks how a deployed resource server keeps enforcing them during key rotation, opaque-token validation, revocation, dependency failure, rollout, and incident response.
+
+The production boundary is narrower and more operational:
+
+- A JWT path verifies a pinned issuer, algorithm, signature key, audience, time claims, and scopes on every request while refreshing JWKS safely.
+- An opaque-token path calls the issuer's authenticated introspection endpoint and validates the returned active state, audience or resource, expiry, subject, and scopes.
+- Revocation policy defines how quickly a credential must stop working and which cache can delay that fact.
+- Failure policy decides what happens when discovery, JWKS, introspection, or revocation infrastructure is unavailable.
+- Evidence records which issuer metadata, key set or introspection response, token claims, policy version, and refusal reason drove the result without storing the token.
+
+This distinction keeps the lessons composable. Lesson 16 proves the flow. Lesson 18 proves that a token remains trustworthy, or is refused, after it reaches a real MCP request path.
 
 ## The Concept
 
@@ -234,6 +249,37 @@ if not result["valid"]:
 
 `validate` decodes the JWT, resolves the signing key from the JWKS cache (refreshing once on a miss), verifies the signature, then checks `iss` against the allow-list, `aud` against this server's canonical resource, `exp`, and the required scope — returning a `WWW-Authenticate` challenge on the first failure. Keeping it a single routine on the resource server means every entry point (every tool call, every transport) goes through the same checks; there is no path that reaches a tool without validating first.
 
+### Opaque tokens use introspection, not guesswork
+
+Not every access token is a JWT. If the issuer documents an opaque token, the resource server cannot decode it into trustworthy claims. It sends the token to the issuer's RFC 7662 introspection endpoint over an authenticated backchannel and requires `active: true`, the expected issuer context, the exact MCP audience or resource, unexpired time claims, and the scopes required by the concrete tool.
+
+Cache introspection by issuer, a one-way token digest, and MCP resource. Never use the clear token as a log or cache label. Bound a positive cache entry by the earliest of token expiry, issuer cache guidance, and the deployment's revocation freshness objective. Keep negative caching short enough that a newly issued token does not remain falsely inactive. A result for one resource cannot authorize another resource even when the opaque token string is identical.
+
+Do not choose validation mode from attacker-controlled token contents. Pin JWT versus introspection behavior to validated issuer metadata and deployment configuration. On the JWT path, pin accepted algorithms and trusted `jwks_uri`; never follow a key URL or algorithm selected only by the token header.
+
+### Revocation is a freshness contract
+
+RFC 7009 lets a client ask an authorization server to revoke a token. That request does not erase copies already cached by every resource server. Define the maximum acceptable revocation delay and make every cache honor it.
+
+Opaque-token deployments can achieve tighter revocation by introspecting on each high-risk call or using a short positive cache. Self-contained JWT deployments usually combine short access-token lifetimes with refresh-token revocation, key retirement for issuer-wide incidents, and an optional subject, session, or token-id denylist for emergency local refusal. A signed JWT remains cryptographically valid until expiry unless the resource server has current external revocation evidence.
+
+Logout, account disablement, consent withdrawal, and incident response are different triggers but must converge on one measurable statement: after at most the declared revocation window, every replica refuses the credential. Test that statement through the load balancer, not only against one warm process.
+
+### Dependency failure needs a declared decision
+
+Never improvise availability policy inside an exception handler.
+
+| Failure | Safe production behavior |
+|---|---|
+| Scheduled JWKS refresh fails, known `kid` remains in a still-valid bounded cache | Continue only within the declared stale-on-error window and emit degraded health evidence |
+| Token has an unknown `kid` and the one allowed refresh fails | Reject; never accept an unverifiable signature |
+| Introspection is unavailable | Fail closed for protected calls; do not convert network failure into `active: true` |
+| Protected-resource or issuer metadata changes unexpectedly | Stop new enrollment and token acquisition; keep only explicitly pinned, unexpired configuration under a bounded incident policy |
+| Revocation endpoint is unavailable | Report logout or revocation as incomplete, retain the credential locally as unusable when possible, and do not claim global revocation succeeded |
+| Clock source or claim type is invalid | Reject rather than widening skew until the token passes |
+
+Classify failures separately from invalid credentials. A dependency outage is an operational error with health and retry policy. A bad signature, issuer, audience, expiry, or scope is an authorization refusal. Neither reaches the tool handler, and neither should leak token contents into audit evidence.
+
 ### Audience-replay walkthrough (access-token privilege restriction)
 
 Server A (`notes.example.com`) and Server B (`tasks.example.com`) both register against the same authorization server. Server A is compromised. The attacker takes a user's notes token and replays it against Server B.
@@ -352,4 +398,5 @@ This lesson produces `outputs/skill-mcp-auth.md`. Given an MCP server config and
 - [RFC 8707 — Resource Indicators for OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc8707) — audience pinning
 - [RFC 9728 — OAuth 2.0 Protected Resource Metadata](https://datatracker.ietf.org/doc/html/rfc9728) — resource server discovery
 - [RFC 9207 — OAuth 2.0 Authorization Server Issuer Identification](https://datatracker.ietf.org/doc/html/rfc9207) — the `iss` parameter that defends against mix-up attacks
-- [OAuth 2.1 draft](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1) — the consolidated OAuth substrate
+- [RFC 7662: OAuth 2.0 Token Introspection](https://datatracker.ietf.org/doc/html/rfc7662)
+- [RFC 7009: OAuth 2.0 Token Revocation](https://datatracker.ietf.org/doc/html/rfc7009)

@@ -203,6 +203,19 @@ Classify a call along three axes:
 
 A single automatic step should not combine all three. Split it, reduce privilege, or request explicit user input through MRTR. This is a design heuristic, not a protocol capability.
 
+### Reduce authority before execution
+
+Statelessness alone is not safety. It removes hidden protocol history, but a self-contained request can still ask an overpowered handler to leak data or make an irreversible change. Safety comes from reducing authority at each boundary:
+
+1. **Typed verb.** Expose one bounded operation such as `archive_note`, not a generic `run` or `request` tool that can express unrelated powers.
+2. **Validated arguments.** Use a closed schema where practical, reject unknown fields, normalize identifiers once, cap sizes, and validate destination, tenant, and resource ownership before policy evaluation.
+3. **Current authorization.** Bind the authenticated principal to the exact verb, resource, environment, and normalized arguments. Tool annotations and client capabilities do not grant this authority.
+4. **Action-bound approval.** For a consequential call, bind approval to a digest of the typed verb and normalized arguments, plus principal, expiry, and one-time policy. Any changed field requires a new decision.
+5. **First-class refusal.** Model deny, expired approval, user decline, and unsafe destination as ordinary outcomes that execute no side effect. Do not translate refusal into a weaker fallback tool.
+6. **Redacted audit evidence.** Record who asked, which admitted descriptor and policy version were used, what normalized target was authorized, why the decision allowed or refused, and whether execution began. Store digests or redacted values instead of secrets.
+
+Each step narrows what the next component may do. The final handler should receive an already validated domain command, not raw model text plus broad credentials. Repeat the entire chain on an MRTR retry, task update, or gateway-forwarded call. An earlier approval does not turn later requests into trusted session traffic.
+
 ### Current and legacy interaction paths
 
 Roots, Sampling, and Logging are deprecated for new 2026-07-28 implementations. A gateway may retain older request-channel code only as a version-gated compatibility path.
@@ -273,8 +286,7 @@ This lesson ships `outputs/skill-mcp-threat-model.md`. It produces a current-pro
 
 ## Further Reading
 
-- [MCP 2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28)
 - [MCP security and trust guidance](https://modelcontextprotocol.io/specification/2026-07-28#security-and-trust--safety)
 - [Multi Round-Trip Requests](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr)
 - [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
-- [Deprecated features](https://modelcontextprotocol.io/specification/2026-07-28/deprecated-features)
+- [Deprecated features](https://modelcontextprotocol.io/specification/2026-07-28/deprecated)

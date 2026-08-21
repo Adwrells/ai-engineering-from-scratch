@@ -18,10 +18,10 @@
     },
     {
       "stage": "check",
-      "question": "Which probe outcome allows legacy initialization?",
-      "options": ["UnsupportedProtocolVersion", "An unrecognized error or timeout", "HeaderMismatch", "MissingRequiredClientCapability"],
-      "correct": 1,
-      "explanation": "Recognized modern errors must be corrected without downgrading."
+      "question": "Which condition is sufficient to select the legacy era?",
+      "options": ["Any -32601 error", "The peer is on a legacy allowlist", "The peer is allowlisted and a bounded initialize probe returns a valid supported legacy result", "A discovery timeout by itself"],
+      "correct": 2,
+      "explanation": "The allowlist permits a probe, but only a structurally valid positive initialize result for a configured legacy revision proves the legacy era."
     },
     {
       "stage": "check",

@@ -1,13 +1,12 @@
 """Phase 13 Lesson 08: a stateless multi-server MCP client.
 Lesson: phases/13-tools-and-protocols/08-building-an-mcp-client/docs/en.md
 Specification: https://modelcontextprotocol.io/specification/2026-07-28/
-Demonstrates discovery, recognized-error handling, legacy fallback, and routing.
+Demonstrates discovery, fail-closed legacy probing, deterministic merge, and routing.
 Run: python3 main.py
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -23,7 +22,7 @@ RECOGNIZED_MODERN_ERRORS = {-32020, -32021, -32022}
 CLIENT_INFO = {"name": "lesson-08-client", "version": "2.0.0"}
 CLIENT_CAPABILITIES: dict[str, Any] = {"extensions": {}}
 
-Transport = Callable[[dict[str, Any]], dict[str, Any] | None]
+Transport = Callable[[dict[str, Any], int | None], dict[str, Any] | None]
 
 
 class RpcFault(Exception):
@@ -94,6 +93,30 @@ def complete(
     return result
 
 
+def decode_rpc_response(
+    response: dict[str, Any],
+    expected_id: int | str,
+) -> tuple[str, dict[str, Any]]:
+    if response.get("jsonrpc") != "2.0" or response.get("id") != expected_id:
+        raise RuntimeError("invalid JSON-RPC response envelope")
+    has_result = "result" in response
+    has_error = "error" in response
+    if has_result == has_error:
+        raise RuntimeError("JSON-RPC response must contain exactly one of result or error")
+    if has_result:
+        result = response["result"]
+        if not isinstance(result, dict):
+            raise RuntimeError("JSON-RPC result must be an object")
+        return "result", result
+    error = response["error"]
+    if not isinstance(error, dict):
+        raise RuntimeError("JSON-RPC error must be an object")
+    code = error.get("code")
+    if not isinstance(code, int) or isinstance(code, bool) or not isinstance(error.get("message"), str):
+        raise RuntimeError("JSON-RPC error requires an integer code and string message")
+    return "error", error
+
+
 def validate_modern_request(message: dict[str, Any], supported: list[str]) -> None:
     if message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str):
         raise RpcFault(-32600, "Invalid Request")
@@ -127,9 +150,15 @@ class ModernFakeServer:
         self.capabilities = capabilities or {"tools": {"listChanged": False}}
         self.supported_versions = supported_versions or [PROTOCOL_VERSION]
         self.received: list[dict[str, Any]] = []
+        self.timeouts_ms: list[int | None] = []
 
-    def __call__(self, message: dict[str, Any]) -> dict[str, Any] | None:
+    def __call__(
+        self,
+        message: dict[str, Any],
+        timeout_ms: int | None = None,
+    ) -> dict[str, Any] | None:
         self.received.append(message)
+        self.timeouts_ms.append(timeout_ms)
         if "id" not in message:
             return None
         request_id = message["id"]
@@ -189,9 +218,15 @@ class LegacyFakeServer:
         self.tools = sorted(tools, key=lambda tool: tool["name"])
         self.initialized = False
         self.received: list[dict[str, Any]] = []
+        self.timeouts_ms: list[int | None] = []
 
-    def __call__(self, message: dict[str, Any]) -> dict[str, Any] | None:
+    def __call__(
+        self,
+        message: dict[str, Any],
+        timeout_ms: int | None = None,
+    ) -> dict[str, Any] | None:
         self.received.append(message)
+        self.timeouts_ms.append(timeout_ms)
         method = message.get("method")
         if method == "server/discover":
             return rpc_error(message.get("id"), -32601, "Method not found")
@@ -229,6 +264,7 @@ class LegacyFakeServer:
 class Peer:
     name: str
     transport: Transport
+    allow_legacy: bool = False
     era: str = "unknown"
     protocol_version: str | None = None
     capabilities: dict[str, Any] = field(default_factory=dict)
@@ -250,10 +286,20 @@ class MultiServerClient:
         self,
         *,
         supported_modern: tuple[str, ...] = (PROTOCOL_VERSION,),
+        supported_legacy: tuple[str, ...] = (LEGACY_VERSION,),
         probe_version: str | None = None,
+        discovery_timeout_ms: int = 1_000,
+        legacy_probe_timeout_ms: int = 1_000,
     ) -> None:
+        if not supported_modern or not supported_legacy:
+            raise ValueError("at least one modern and legacy version must be configured")
+        if discovery_timeout_ms <= 0 or legacy_probe_timeout_ms <= 0:
+            raise ValueError("probe timeouts must be positive")
         self.supported_modern = supported_modern
+        self.supported_legacy = supported_legacy
         self.probe_version = probe_version or supported_modern[0]
+        self.discovery_timeout_ms = discovery_timeout_ms
+        self.legacy_probe_timeout_ms = legacy_probe_timeout_ms
         self.client_capabilities = CLIENT_CAPABILITIES.copy()
         self.peers: dict[str, Peer] = {}
         self.registry: dict[str, MergedTool] = {}
@@ -264,8 +310,26 @@ class MultiServerClient:
         self._next_request_id += 1
         return request_id
 
-    def add_server(self, name: str, transport: Transport) -> None:
-        self.peers[name] = Peer(name=name, transport=transport)
+    def add_server(
+        self,
+        name: str,
+        transport: Transport,
+        *,
+        allow_legacy: bool = False,
+    ) -> None:
+        self.peers[name] = Peer(
+            name=name,
+            transport=transport,
+            allow_legacy=allow_legacy,
+        )
+
+    @staticmethod
+    def _send(
+        peer: Peer,
+        message: dict[str, Any],
+        timeout_ms: int | None = None,
+    ) -> dict[str, Any] | None:
+        return peer.transport(message, timeout_ms)
 
     def _mutual_version(self, advertised: list[Any]) -> str | None:
         common = [version for version in advertised if version in self.supported_modern]
@@ -280,73 +344,120 @@ class MultiServerClient:
         peer.server_info = result.get("_meta", {}).get(SERVER_INFO_KEY, {})
         peer.available = True
 
-    def _legacy_fallback(self, peer: Peer) -> None:
+    def _probe_legacy(self, peer: Peer, trigger: str) -> None:
+        if not peer.allow_legacy:
+            raise RuntimeError(
+                f"{peer.name}: {trigger}; legacy compatibility is not allowlisted"
+            )
+        request_id = self._new_id()
         initialize = legacy_request(
-            self._new_id(),
+            request_id,
             "initialize",
             {
-                "protocolVersion": LEGACY_VERSION,
+                "protocolVersion": self.supported_legacy[0],
                 "capabilities": self.client_capabilities.copy(),
                 "clientInfo": CLIENT_INFO.copy(),
             },
         )
-        response = peer.transport(initialize)
-        if response is None or "result" not in response:
-            raise RuntimeError(f"{peer.name}: legacy initialize failed")
-        result = response["result"]
+        try:
+            response = self._send(peer, initialize, self.legacy_probe_timeout_ms)
+        except (TimeoutError, ConnectionError) as exc:
+            raise RuntimeError(f"{peer.name}: bounded legacy probe failed closed") from exc
+        if not isinstance(response, dict):
+            raise RuntimeError(f"{peer.name}: bounded legacy probe returned no result")
+        kind, payload = decode_rpc_response(response, request_id)
+        if kind != "result":
+            raise RuntimeError(f"{peer.name}: legacy initialize returned an error")
+        result = payload
+        version = result.get("protocolVersion")
+        capabilities = result.get("capabilities")
+        server_info = result.get("serverInfo")
+        valid_server_info = (
+            isinstance(server_info, dict)
+            and isinstance(server_info.get("name"), str)
+            and bool(server_info["name"])
+            and isinstance(server_info.get("version"), str)
+            and bool(server_info["version"])
+        )
+        if version not in self.supported_legacy:
+            raise RuntimeError(f"{peer.name}: unsupported legacy protocol revision")
+        if not isinstance(capabilities, dict) or not valid_server_info:
+            raise RuntimeError(f"{peer.name}: malformed legacy initialize result")
         peer.era = "legacy"
-        peer.protocol_version = result["protocolVersion"]
-        peer.capabilities = result.get("capabilities", {})
-        peer.server_info = result.get("serverInfo", {})
+        peer.protocol_version = version
+        peer.capabilities = capabilities
+        peer.server_info = server_info
         peer.available = True
-        peer.transport(
+        self._send(
+            peer,
             {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
         )
 
     def _connect_peer(self, peer: Peer) -> None:
+        if peer.available and peer.era in {"modern", "legacy"}:
+            return
+        request_id = self._new_id()
         probe = modern_request(
-            self._new_id(),
+            request_id,
             "server/discover",
             {},
             self.probe_version,
             self.client_capabilities,
         )
         try:
-            response = peer.transport(probe)
-        except TimeoutError:
-            self._legacy_fallback(peer)
+            response = self._send(peer, probe, self.discovery_timeout_ms)
+        except (TimeoutError, ConnectionError) as exc:
+            self._probe_legacy(peer, type(exc).__name__)
             return
 
-        if response is not None and "result" in response:
-            advertised = response["result"].get("supportedVersions", [])
+        if response is None:
+            self._probe_legacy(peer, "empty discovery response")
+            return
+        if not isinstance(response, dict):
+            raise RuntimeError(f"{peer.name}: malformed discovery response")
+        kind, payload = decode_rpc_response(response, request_id)
+        if kind == "result":
+            advertised = payload.get("supportedVersions", [])
+            if not isinstance(advertised, list) or not all(
+                isinstance(version, str) for version in advertised
+            ):
+                raise RuntimeError(f"{peer.name}: malformed modern discovery result")
             selected = self._mutual_version(advertised)
             if selected is None:
                 raise RuntimeError(f"{peer.name}: no mutually supported modern version")
-            self._activate_modern(peer, response["result"], selected)
+            self._activate_modern(peer, payload, selected)
             return
 
-        error = response.get("error", {}) if isinstance(response, dict) else {}
-        code = error.get("code")
+        code = payload["code"]
         if code in RECOGNIZED_MODERN_ERRORS:
             if code != -32022:
                 raise RuntimeError(f"{peer.name}: correct modern request error {code} before retrying")
-            selected = self._mutual_version(error.get("data", {}).get("supported", []))
+            data = payload.get("data")
+            advertised = data.get("supported", []) if isinstance(data, dict) else []
+            selected = self._mutual_version(advertised)
             if selected is None:
                 raise RuntimeError(f"{peer.name}: no mutually supported modern version")
+            retry_id = self._new_id()
             retry = modern_request(
-                self._new_id(),
+                retry_id,
                 "server/discover",
                 {},
                 selected,
                 self.client_capabilities,
             )
-            retried = peer.transport(retry)
-            if retried is None or "result" not in retried:
-                raise RuntimeError(f"{peer.name}: modern discovery retry failed")
-            self._activate_modern(peer, retried["result"], selected)
+            try:
+                retried = self._send(peer, retry, self.discovery_timeout_ms)
+            except (TimeoutError, ConnectionError) as exc:
+                raise RuntimeError(f"{peer.name}: proven-modern discovery retry failed") from exc
+            if not isinstance(retried, dict):
+                raise RuntimeError(f"{peer.name}: proven-modern discovery retry returned no result")
+            retry_kind, retry_payload = decode_rpc_response(retried, retry_id)
+            if retry_kind != "result":
+                raise RuntimeError(f"{peer.name}: proven-modern discovery retry returned an error")
+            self._activate_modern(peer, retry_payload, selected)
             return
 
-        self._legacy_fallback(peer)
+        self._probe_legacy(peer, f"unrecognized discovery error {code}")
 
     def connect_all(self) -> None:
         for peer_name in sorted(self.peers):
@@ -366,7 +477,7 @@ class MultiServerClient:
             message = legacy_request(request_id, method, params)
         else:
             raise RuntimeError(f"{peer.name}: protocol era not selected")
-        response = peer.transport(message)
+        response = self._send(peer, message)
         if response is None or response.get("id") != request_id:
             raise RuntimeError(f"{peer.name}: missing or mismatched response")
         if "error" in response:
@@ -446,7 +557,7 @@ def main() -> None:
     client = MultiServerClient()
     client.add_server("notes", notes)
     client.add_server("files", files)
-    client.add_server("archive", archive)
+    client.add_server("archive", archive, allow_legacy=True)
 
     client.connect_all()
     client.discover_tools()

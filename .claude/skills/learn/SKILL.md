@@ -31,6 +31,15 @@ https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/<pat
 - Lesson list for a phase: the Contents section of `README.md` (each phase's
   table lists every lesson with its directory path and title)
 
+## Focused MCP handoff
+
+If the learner asks for the MCP Engineering path, or
+`MCP-ENGINEERING-LEARNING.md` exists and they ask to resume MCP, hand off to
+the portable skill `learn-mcp-engineering`. Its source of truth is
+`learning-paths/mcp-engineering.json`. Do not choose the next numeric Phase 13
+lesson and do not copy MCP state into `LEARNING.md`; the dedicated tutor owns
+the route order, wire checkpoints, and security gate.
+
 ## Step 0 — Locate state
 
 Read `LEARNING.md` from the current directory.

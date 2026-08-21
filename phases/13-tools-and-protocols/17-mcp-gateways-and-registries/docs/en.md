@@ -47,6 +47,14 @@ For each request:
 
 No step needs a hidden protocol session. Application state can still exist in databases, explicit handles, Tasks, or integrity-protected MRTR state.
 
+### Runtime policy is the primary gateway decision
+
+Admission decides which backend version may enter the gateway. It does not authorize a live call. For every request, the gateway recomputes policy from the authenticated principal, issuer and resource, tenant, matched method and name, normalized arguments, admitted descriptor pin, current backend health, capability intersection, data classification, rate state, and any action-bound approval.
+
+This ordering matters. A Registry record can remain active while a user's role is revoked. A descriptor can remain pinned while a destination argument crosses a tenant boundary. A backend can remain approved while incident policy quarantines state-changing calls. Runtime policy is therefore the primary allow or deny decision, with Registry and descriptor evidence as inputs.
+
+Do not cache an allow decision under a connection or removed session identifier. If policy is unavailable, follow a declared failure policy by operation class. A safe default is to fail closed for state changes and sensitive reads, while explicitly approved public read paths may use a short-lived last-known policy only when their risk model permits it. Record which policy version and failure path made the decision, then validate the backend result before returning it.
+
 ### One POST endpoint
 
 Modern Streamable HTTP sends each JSON-RPC message through POST:
@@ -192,6 +200,8 @@ For each admitted backend, record:
 - Reviewer, approval time, and expiry.
 
 Do not accept a server because its display name resembles a familiar product. Do not treat registry presence as an operational security review. Private servers can be admitted through the same evidence schema even when they never appear in a public registry.
+
+This lesson implements the gateway seam: join publication evidence to local admission before a backend becomes routable. [Lesson 30: MCP Registry Supply Chain, Admission, Drift, and Rollback](../../30-mcp-registry-supply-chain-and-drift/docs/en.md) builds the full control plane for exact namespace proof, artifact provenance, immutable pins, live descriptor drift, Registry status reconciliation, a tamper-evident admission ledger, and evidence-backed rollback. Keep that supply-chain state separate from the per-request runtime decision above.
 
 ### Credential mediation
 
@@ -360,8 +370,7 @@ This lesson ships `outputs/skill-gateway-bootstrap.md`. It produces a modern gat
 
 ## Further Reading
 
-- [MCP 2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28)
 - [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 - [Server discovery](https://modelcontextprotocol.io/specification/2026-07-28/server/discover)
-- [Official MCP Registry](https://registry.modelcontextprotocol.io/)
+- [Official Registry server.json requirements](https://github.com/modelcontextprotocol/registry/blob/main/docs/reference/server-json/official-registry-requirements.md)
 - [MCP Tasks extension](https://tasks.extensions.modelcontextprotocol.io/specification/draft/tasks)

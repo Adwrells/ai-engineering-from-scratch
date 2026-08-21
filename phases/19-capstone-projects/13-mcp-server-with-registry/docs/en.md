@@ -5,6 +5,7 @@
 **Type:** Capstone
 **Languages:** Python and TypeScript reference models; any production language
 **Prerequisites:** Phase 11, Phase 13, Phase 14, Phase 17, and Phase 18
+**Required MCP deep dives:** [Lesson 28: Tool Contracts](../../../13-tools-and-protocols/28-mcp-tool-contracts-and-content/docs/en.md), [Lesson 29: Reliability](../../../13-tools-and-protocols/29-mcp-reliability-cancellation-and-flow-control/docs/en.md), [Lesson 30: Registry Supply Chain](../../../13-tools-and-protocols/30-mcp-registry-supply-chain-and-drift/docs/en.md), and [Lesson 31: Conformance Operations](../../../13-tools-and-protocols/31-mcp-conformance-versioning-and-operations/docs/en.md)
 **Protocol target:** MCP `2026-07-28`
 **Time:** ~25 hours
 
@@ -16,6 +17,17 @@
 - Enforce issuer, audience, scope, and approval policy for every tool call.
 - Deploy Streamable HTTP without session affinity.
 - Prove behavior at the wire, authorization, policy, registry, and audit boundaries.
+
+## Required MCP Prerequisite Path
+
+Complete the four linked Phase 13 lessons in order before treating this capstone as production-ready:
+
+1. [Lesson 28](../../../13-tools-and-protocols/28-mcp-tool-contracts-and-content/docs/en.md) defines the tool, schema, content, pagination, completion, routing, and error contracts this server must expose.
+2. [Lesson 29](../../../13-tools-and-protocols/29-mcp-reliability-cancellation-and-flow-control/docs/en.md) defines cancellation races, deadlines, idempotency, backpressure, retry, and reconnect behavior.
+3. [Lesson 30](../../../13-tools-and-protocols/30-mcp-registry-supply-chain-and-drift/docs/en.md) defines namespace, provenance, admission pin, Registry status, drift, ledger, and rollback evidence.
+4. [Lesson 31](../../../13-tools-and-protocols/31-mcp-conformance-versioning-and-operations/docs/en.md) defines golden and negative transcripts, strict version eras, SDK differential checks, proxy proof, redaction, health, and release gating.
+
+The capstone integrates those artifacts. It does not replace them with one happy-path SDK test.
 
 ## The Problem
 
@@ -221,6 +233,20 @@ Place two stateless replicas behind a load balancer. Send at least 100 concurren
 
 Run conformance checks against the actual server binary. Capture request headers and JSON bodies, not only SDK objects. Exercise wrong version, header mismatch, missing scope, wrong audience, malformed arguments, handler failure, cancellation, and cache expiry.
 
+## Required Evidence Pack
+
+A submission is incomplete until it contains all five evidence classes:
+
+| Evidence | Minimum proof | Source lesson |
+|---|---|---|
+| Wire | Redacted raw headers and JSON-RPC bodies for golden and negative cases, including metadata type failure, header mismatch, unsupported version, missing or unknown `resultType`, notification no-response, and response ID matching | [Lesson 31](../../../13-tools-and-protocols/31-mcp-conformance-versioning-and-operations/docs/en.md) |
+| Proxy | The same stable case run directly and through the deployed intermediary, with ingress, origin, and egress status and body digests; prove protocol errors are not collapsed into generic 500 responses and streaming is not buffered | [Lessons 29](../../../13-tools-and-protocols/29-mcp-reliability-cancellation-and-flow-control/docs/en.md) and [31](../../../13-tools-and-protocols/31-mcp-conformance-versioning-and-operations/docs/en.md) |
+| Admission | Verified publisher namespace, immutable Registry record digest, artifact or remote provenance, live `server/discover` identity and capability observation, descriptor pin, current Registry status, and admission-ledger event | [Lesson 30](../../../13-tools-and-protocols/30-mcp-registry-supply-chain-and-drift/docs/en.md) |
+| Retry | A cancellation-versus-completion race, explicit timeout, safe read retry, mutation idempotency key, reconnect refetch, and proof that request cancellation cannot silently become durable task cancellation | [Lesson 29](../../../13-tools-and-protocols/29-mcp-reliability-cancellation-and-flow-control/docs/en.md) |
+| Rollback | Exact previous version, admission and artifact digests, descriptor pin, active Registry status, current health window, route restoration result, and redacted decision evidence | [Lessons 30](../../../13-tools-and-protocols/30-mcp-registry-supply-chain-and-drift/docs/en.md) and [31](../../../13-tools-and-protocols/31-mcp-conformance-versioning-and-operations/docs/en.md) |
+
+Store a digest of the redacted pack with the release. If any class is missing, hold the release. Do not infer proxy behavior from an in-process dispatcher, admission from Registry presence, retry safety from a new JSON-RPC id, or rollback readiness from “the previous deployment.”
+
 ## Local Reference Models
 
 The Python model demonstrates registry metadata, reverse-DNS publisher namespace validation, publication-to-runtime identity checks, live discovery, deterministic tool listing, per-request metadata, trusted-issuer, audience, expiry, and scope checks, action-bound approvals, a documented partial Registry validator, policy, and audit without opening a network socket:
@@ -286,7 +312,8 @@ Ship a repository containing:
 - a Registry publisher or private Registry API adapter;
 - policy definitions and action-bound approval records;
 - redacted audit output and trace propagation;
-- wire-level failure evidence and a rollback plan.
+- wire and proxy failure evidence;
+- admission, retry, health, and rollback evidence with a digest of the redacted pack.
 
 | Weight | Criterion | Evidence |
 |---:|---|---|
@@ -321,10 +348,9 @@ Ship a repository containing:
 
 ## Further Reading
 
-- [MCP specification 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
 - [MCP 2026-07-28 key changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
 - [Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 - [Server discovery](https://modelcontextprotocol.io/specification/2026-07-28/server/discover)
 - [MCP authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
-- [MCP Registry overview](https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/about.mdx)
-- [Registry publishing quickstart](https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/quickstart.mdx)
+- [Official Registry server.json requirements](https://github.com/modelcontextprotocol/registry/blob/main/docs/reference/server-json/official-registry-requirements.md)
+- [Official Registry OpenAPI contract](https://registry.modelcontextprotocol.io/openapi.yaml)

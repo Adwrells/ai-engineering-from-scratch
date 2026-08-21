@@ -157,6 +157,18 @@ Removing protocol sessions does not forbid workflows with state. The server may 
 
 Bind handles to the authenticated principal, make them unguessable, expire them, and authorize every use. This makes state visible at the application layer instead of hiding it in transport affinity.
 
+The failure caused by hidden replica state is mechanical:
+
+1. Request A reaches replica 1 and creates a draft in that process's memory.
+2. The response does not return a draft handle because the implementation assumes the connection identifies the draft.
+3. Request B is a fresh POST and reaches replica 2.
+4. Replica 2 has valid protocol metadata but no way to name or load the draft, so the workflow fails or reads the wrong local object.
+5. Sticky routing appears to fix the symptom until a restart, rollout, reschedule, or failover moves the next request.
+
+The correct boundary has two parts. Protocol context stays in each request. Durable application state lives in a shared store under a server-minted handle returned to the client. The next call supplies that handle, any replica loads the same record, and authorization binds the record to the authenticated principal and tenant. Replica memory may cache a record, but it cannot be the only copy required for correctness.
+
+Choose the state mechanism by lifetime. Request-local variables can serve one call. A short MRTR continuation can use integrity-protected `requestState`. A draft or durable task needs an explicit handle plus shared persistence, expiry, concurrency control, and idempotency. None of those objects is an MCP protocol session.
+
 ### HTTP dual-era compatibility
 
 A client that supports modern and legacy servers attempts a modern POST first. If it receives HTTP `400`, `404`, or `405`, it inspects the body:
@@ -218,7 +230,6 @@ This lesson ships `outputs/skill-mcp-transport-migrator.md`. It removes modern p
 
 ## Further Reading
 
-- [MCP Specification 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/)
 - [MCP Transport Overview](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)
 - [MCP stdio Transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)
 - [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)

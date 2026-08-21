@@ -131,12 +131,16 @@ The client selects a mutually supported modern version and retries with a new JS
 Trace a modern request in this order:
 
 1. Parse one JSON-RPC envelope.
-2. Confirm `jsonrpc` is `"2.0"`, an `id` exists, and `params` is an object.
-3. Read the version and capabilities from `params._meta`.
-4. Reject an unsupported version with `-32022`.
-5. Route by `method` and validate method-specific arguments.
-6. Return a complete result with server identity.
-7. Forget request-scoped metadata.
+2. Confirm `jsonrpc` is `"2.0"`, an `id` exists, `method` is a string, and `params` is an object.
+3. Require the version string and capability object in `params._meta`; malformed or missing metadata is `-32602`.
+4. At an HTTP boundary, compare the version, method, and applicable name headers with the body. A mismatch is `-32020` even when one of the two version values is unsupported.
+5. After equality is established, reject a matched but unsupported version with `-32022`.
+6. Check required capabilities, then route by `method` and validate method-specific arguments.
+7. Authenticate and authorize the concrete operation before its handler runs.
+8. Return a complete result with server identity.
+9. Forget request-scoped protocol metadata.
+
+That order prevents two components from interpreting different calls. A gateway must not authorize `Mcp-Name: notes.read` while the origin executes `params.name: notes.delete`. It also keeps malformed input, header confusion, version negotiation, capability failure, authorization, and handler failure as distinct evidence.
 
 Closing stdin or an HTTP response ends transport activity. It does not terminate a protocol session because modern MCP has no protocol session.
 
@@ -145,6 +149,10 @@ Closing stdin or an HTTP response ends transport activity. It does not terminate
 Versions through `2025-11-25` use `initialize`, `notifications/initialized`, connection-scoped capabilities, and, on earlier Streamable HTTP, optional protocol sessions. That behavior is still relevant when a dual-era client talks to an old server.
 
 Keep the eras separate. A modern request is identified by the required per-request metadata. A legacy connection is selected only through the documented fallback path. Do not send `initialize` as the default for a `2026-07-28` server.
+
+“Stateless” therefore has an era-specific meaning. In `2026-07-28`, it is a protocol invariant: every ordinary request is independently interpretable and no MCP session exists. In versions through `2025-11-25`, initialization and negotiated capabilities belong to a connection, so a compatibility adapter may retain that legacy connection state. A dual-era implementation is not one permissive state machine. It is a stateless modern core beside an isolated legacy adapter, with an explicit selection decision before either parser runs.
+
+Neither meaning forbids durable application state. A workflow, task, or draft can live behind an opaque handle in a shared store. The client sends that handle as ordinary input, and every replica authenticates and authorizes its use. Protocol context must not leak into that store as a substitute for the removed session.
 
 ```figure
 mcp-tool-call
@@ -192,7 +200,6 @@ This lesson ships `outputs/skill-mcp-handshake-tracer.md`. The historical filena
 
 ## Further Reading
 
-- [MCP Specification 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/)
 - [MCP Architecture](https://modelcontextprotocol.io/specification/2026-07-28/architecture)
 - [MCP Base Protocol](https://modelcontextprotocol.io/specification/2026-07-28/basic)
 - [MCP Server Discovery](https://modelcontextprotocol.io/specification/2026-07-28/server/discover)

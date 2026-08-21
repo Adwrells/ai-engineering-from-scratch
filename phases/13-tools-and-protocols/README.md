@@ -3,32 +3,68 @@
 > The interfaces between AI and the real world.
 
 This phase moves from function calls and tool schemas into interoperable
-protocols, Agent Skills, security, and production governance. Most learners
-should follow the numbered lessons. If Agent Skills are your immediate goal,
-use the focused path below.
+protocols, Agent Skills, security, and production governance. Numeric order is
+useful for browsing. The focused routes below are the reliable learning order.
 
-## MCP 2026 stateless path
+## MCP Engineering path
 
-Lessons 06 through 18 now follow the MCP 2026-07-28 revision. Start with
-[Lesson 06](06-mcp-fundamentals/) and continue in number order. The current
-contract is deliberately stateless:
+The focused MCP route is 17 lessons and about 23 hours 15 minutes. It follows
+MCP `2026-07-28` from one self-describing JSON-RPC request to an operational
+conformance gate.
 
-- every request declares the protocol version and client capabilities in
-  `params._meta`;
-- `server/discover` replaces initialization as the capability snapshot;
-- Streamable HTTP uses one `POST /mcp` endpoint, with JSON or request-scoped
-  SSE responses;
-- Multi Round-Trip Requests replace server-initiated roots, sampling, and
-  elicitation;
-- long-running work uses the official tasks extension and subscriptions use
-  `subscriptions/listen`;
-- OAuth identity and authorization are validated independently on every
-  request.
+| Stage | Lessons | What you prove | Time |
+|---|---|---|---:|
+| Core | [06](06-mcp-fundamentals/), [07](07-building-an-mcp-server/), [08](08-building-an-mcp-client/), [09](09-mcp-transports/), [10](10-mcp-resources-and-prompts/) | Envelopes, discovery, client and server behavior, transports, resources, and prompts. | 5 hr 50 min |
+| Bidirectional | [11](11-mcp-sampling/), [12](12-mcp-roots-and-elicitation/), [13](13-mcp-async-tasks/), [14](14-mcp-apps/) | MRTR input, explicit scope, durable tasks, and app boundaries without server-initiated requests. | 5 hr |
+| Secure | [15](15-mcp-security-tool-poisoning/), [16](16-mcp-security-oauth-2-1/), [18](18-mcp-auth-production/), [17](17-mcp-gateways-and-registries/) | Poisoning defenses, authorization, production tokens, gateway routing, and registry admission. | 5 hr 15 min |
+| Advanced | [28](28-mcp-tool-contracts-and-content/), [29](29-mcp-reliability-cancellation-and-flow-control/), [30](30-mcp-registry-supply-chain-and-drift/), [31](31-mcp-conformance-versioning-and-operations/) | Contract fidelity, cancellation races, supply-chain drift, and release evidence. | 7 hr 10 min |
+
+The exact order is 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 18, 17, 28,
+29, 30, 31. It is defined in
+[`learning-paths/mcp-engineering.json`](../../learning-paths/mcp-engineering.json).
+The tutor creates `MCP-ENGINEERING-LEARNING.md`, teaches one lesson per
+invocation, and records the request, response, command, working directory, exit
+code, and redacted boundary evidence required by each checkpoint.
+
+Start with the invocation supported by your host:
+
+| Host | Invocation |
+|---|---|
+| Codex | `$learn-mcp-engineering`, or choose `learn-mcp-engineering` from `/skills` |
+| Claude Code | `/learn-mcp-engineering` |
+| Other compatible hosts | `Use learn-mcp-engineering to start or resume the MCP Engineering path.` |
+
+### Your first ten minutes
+
+From the repository root, run Lesson 06's stateless transcript:
+
+```bash
+python3 phases/13-tools-and-protocols/06-mcp-fundamentals/code/main.py
+```
+
+Find four things in the output: repeated request metadata, a complete
+`server/discover` result, error `-32022` for an unsupported version, and a
+transport close that does not create or terminate an MCP protocol session.
+That transcript is the first checkpoint, not just a demo.
+
+If the repository or Python 3 is unavailable, read [Lesson 06](06-mcp-fundamentals/)
+and hand-trace one request and response. Mark the checkpoint conceptual and
+leave runtime, transport, authorization, and deployment evidence pending.
+
+Complete Lesson 15's executable security checkpoint before any non-loopback
+bind, shared ingress, hosted endpoint, or registry publication. Review the
+external target and requested authority, then confirm the deployment action
+explicitly. A completed tutorial does not grant deployment authority.
 
 Older `initialize`, `Mcp-Session-Id`, standalone SSE `GET`, session `DELETE`,
 and server-initiated request flows appear only in explicit compatibility notes.
-Use the [2026-07-28 changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
-as the revision boundary when comparing older implementations.
+Modern requests declare protocol version and client capabilities in
+`params._meta`, use `server/discover`, and carry enough information to be
+validated, authorized, routed, and retried independently.
+
+[Lesson 23](23-capstone-tool-ecosystem/) is the only optional MCP route
+capstone. Complete the 17 required lessons plus [Lesson 19](19-a2a-protocol/)
+and [Lesson 20](20-opentelemetry-genai/) before starting it.
 
 ## Agent Skills fast path
 
@@ -55,8 +91,7 @@ invocation, and records the evidence required by each checkpoint. The route is
 defined in
 [`learning-paths/agent-skills.json`](../../learning-paths/agent-skills.json).
 
-If you prefer the website, start with
-[Lesson 22](https://aiengineeringfromscratch.com/lesson.html?path=phases/13-tools-and-protocols/22-skills-and-agent-sdks&learningPath=agent-skills).
+If you prefer to read first, start with [Lesson 22](22-skills-and-agent-sdks/).
 Its first lab gets a skill into a real host in about ten minutes.
 
 ### Prerequisite fast lane

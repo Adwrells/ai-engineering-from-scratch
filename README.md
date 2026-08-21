@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1a1a1a?style=flat-square&labelColor=fafaf5" alt="MIT License"></a>
-  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/lessons-507-3553ff?style=flat-square&labelColor=fafaf5" alt="507 lessons"></a>
+  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/lessons-511-3553ff?style=flat-square&labelColor=fafaf5" alt="511 lessons"></a>
   <a href="#contents"><img src="https://img.shields.io/badge/phases-20-3553ff?style=flat-square&labelColor=fafaf5" alt="20 phases"></a>
   <a href="https://github.com/rohitg00/ai-engineering-from-scratch/stargazers"><img src="https://img.shields.io/github/stars/rohitg00/ai-engineering-from-scratch?style=flat-square&labelColor=fafaf5&color=3553ff" alt="GitHub stars"></a>
   <a href="https://aiengineeringfromscratch.com"><img src="https://img.shields.io/badge/web-aiengineeringfromscratch.com-3553ff?style=flat-square&labelColor=fafaf5" alt="Website"></a>
@@ -36,7 +36,7 @@
 > **84% of students already use AI tools. Only 18% feel prepared to use them
 > professionally.** This curriculum closes that gap.
 >
-> 507 lessons. 20 phases. ~329 hours. Python, TypeScript, Rust, Julia. Every lesson ships
+> 511 lessons. 20 phases. ~329 hours. Python, TypeScript, Rust, Julia. Every lesson ships
 > a reusable artifact: a prompt, a skill, an agent, an MCP server. Free, open source, MIT.
 >
 > You don't just learn AI. You build it. End-to-end. By hand.
@@ -49,8 +49,9 @@
 
 If Node.js, `npx`, and a skill-capable coding agent are already installed,
 your coding agent can become your tutor in two commands. A repository clone is
-not needed to install or read the tutor. The runnable Agent Skills labs also
-need `python3`, a selected host, and a writable user or project skill scope.
+not needed to install or read the tutor. Runnable focused-path labs need
+`python3`. Agent Skills host labs also need a selected host and a writable
+user or project skill scope.
 
 Check the local requirements first:
 
@@ -69,11 +70,11 @@ npx skills add rohitg00/ai-engineering-from-scratch
 
 Invocation syntax belongs to the host, not to the portable `SKILL.md` format:
 
-| Host | Start the course | Start Agent Skills | Run a phase quiz |
-|---|---|---|---|
-| Codex | `$start-learning`, or choose it from `/skills` | `$learn-agent-skills`, or choose it from `/skills` | `$check-understanding 13`, or choose it from `/skills` |
-| Claude Code | `/start-learning` | `/learn-agent-skills` | `/check-understanding 13` |
-| Other compatible hosts | `Use start-learning to begin the course.` | `Use learn-agent-skills to start the Agent Skills Engineering path.` | `Use check-understanding to quiz me on Phase 13.` |
+| Host | Start the course | Start MCP Engineering | Start Agent Skills | Run a phase quiz |
+|---|---|---|---|---|
+| Codex | `$start-learning`, or choose it from `/skills` | `$learn-mcp-engineering`, or choose it from `/skills` | `$learn-agent-skills`, or choose it from `/skills` | `$check-understanding 13`, or choose it from `/skills` |
+| Claude Code | `/start-learning` | `/learn-mcp-engineering` | `/learn-agent-skills` | `/check-understanding 13` |
+| Other compatible hosts | `Use start-learning to begin the course.` | `Use learn-mcp-engineering to start the MCP Engineering path.` | `Use learn-agent-skills to start the Agent Skills Engineering path.` | `Use check-understanding to quiz me on Phase 13.` |
 
 A ten-question placement quiz maps what you already know to a starting phase and
 saves a personalized study plan to `LEARNING.md`. From there, `/learn` teaches
@@ -82,6 +83,12 @@ from this repo, and the `course-guide` skill jumps you to the exact lesson that
 covers anything you are stuck on. In Codex, invoke these skills with `$learn`
 and `$course-guide`; in Claude Code, use `/learn` and `/course-guide`; in other
 compatible hosts, ask to use the skill by name.
+
+Only want MCP Engineering? Use the MCP invocation for your host. It creates
+`MCP-ENGINEERING-LEARNING.md` and follows one 17-lesson route through stateless
+requests, transports, bidirectional work, security, reliability, registry
+governance, and conformance evidence. The exact order and checkpoints live in
+the [MCP Engineering manifest](learning-paths/mcp-engineering.json).
 
 Only want Agent Skills? Use the Agent Skills invocation for your host. It
 creates `AGENT-SKILLS-LEARNING.md` and follows one coherent five-lesson route:
@@ -103,7 +110,7 @@ flashy agent demo somewhere else. The pieces rarely line up. You ship a chatbot 
 explain its loss curve. You hook a function to an agent but can't say what attention does
 inside the model that's calling it.
 
-This curriculum is the spine. 20 phases, 507 lessons, four languages: Python, TypeScript,
+This curriculum is the spine. 20 phases, 511 lessons, four languages: Python, TypeScript,
 Rust, Julia. Linear algebra at one end, autonomous swarms at the other. Every algorithm
 gets built from raw math first. Backprop. Tokenizer. Attention. Agent loop. By the time
 PyTorch shows up, you already know what it's doing under the hood.
@@ -192,9 +199,10 @@ npx skills add rohitg00/ai-engineering-from-scratch
 
 Use the host-specific invocation table above. The installed skills provide
 `start-learning`, `learn`, `course-guide`, and the focused
-`learn-agent-skills` route. Lesson prose can stream from this repository
-without a clone. A local clone is required for copied repository code commands
-and the later Agent Skills package labs. Progress lives in `LEARNING.md` or
+`learn-mcp-engineering` and `learn-agent-skills` routes. Lesson prose can
+stream from this repository without a clone. A local clone is required for
+copied repository code commands and executable MCP or Agent Skills labs.
+Progress lives in `LEARNING.md`, `MCP-ENGINEERING-LEARNING.md`, or
 `AGENT-SKILLS-LEARNING.md` in your project, so every session can resume.
 
 **Option B — read.** Open any completed lesson on
@@ -243,6 +251,7 @@ a passing score.
 | [`start-learning`](skills/start-learning/SKILL.md) | One-time onboarding: why you're learning, placement quiz, personalized plan saved to `LEARNING.md`. |
 | [`learn`](skills/learn/SKILL.md) | The tutor loop. Warm-up recall, then the next lesson taught interactively, then its quiz; records progress and a review queue. |
 | [`course-guide`](skills/course-guide/SKILL.md) | Topic router. "Where do I learn attention?" or "my loss is NaN" → the exact lessons, with links. |
+| [`learn-mcp-engineering`](skills/learn-mcp-engineering/SKILL.md) | Focused MCP tutor. Creates `MCP-ENGINEERING-LEARNING.md`, follows the 17-lesson manifest, and records wire, security, reliability, and conformance evidence. |
 | [`learn-agent-skills`](skills/learn-agent-skills/SKILL.md) | Focused Agent Skills tutor. Creates `AGENT-SKILLS-LEARNING.md`, teaches lessons 22, 24, 25, 26, and 27, and records real-host evidence. |
 | [`claude-certification`](skills/claude-certification/SKILL.md) | Certification tutor. Chooses CCAO-F, CCDV-F, CCAR-F, or CCAR-P; teaches each lesson; runs labs; reviews artifacts; administers diagnostics and mocks; saves progress. |
 | [`find-your-level`](skills/find-your-level/SKILL.md) | Ten-question placement quiz. Maps your knowledge to a starting phase and produces a personalized path with hour estimates. |
@@ -296,7 +305,7 @@ Other curricula end with *"congratulations, you learned X."* Each lesson here en
 </table>
 
 > Install the lot with `python3 scripts/install_skills.py <target>`. Real tools, not homework.
-> By the end of the curriculum, you have a portfolio of 507 artifacts you actually
+> By the end of the curriculum, you have a portfolio of 511 artifacts you actually
 > understand because you built them.
 
 ### FIG_002 · A worked sample
@@ -725,7 +734,7 @@ Twenty phases. Click any phase to expand its lesson list.
 </details>
 
 <details id="phase-13">
-<summary><b>Phase 13 — Tools & Protocols</b> &nbsp;<code>27 lessons</code>&nbsp; <em>The interfaces between AI and the real world.</em></summary>
+<summary><b>Phase 13 — Tools & Protocols</b> &nbsp;<code>31 lessons</code>&nbsp; <em>The interfaces between AI and the real world.</em></summary>
 <br/>
 
 | # | Lesson | Type | Lang |
@@ -736,7 +745,7 @@ Twenty phases. Click any phase to expand its lesson list.
 | 04 | [Structured Output](phases/13-tools-and-protocols/04-structured-output/) | Build | Python |
 | 05 | [Tool Schema Design](phases/13-tools-and-protocols/05-tool-schema-design/) | Learn | Python |
 | 06 | [MCP Fundamentals: Stateless Requests and JSON-RPC](phases/13-tools-and-protocols/06-mcp-fundamentals/) | Learn | Python |
-| 07 | [Building an MCP Server: Stateless Python and TypeScript](phases/13-tools-and-protocols/07-building-an-mcp-server/) | Build | Python |
+| 07 | [Building an MCP Server: Stateless Python and TypeScript](phases/13-tools-and-protocols/07-building-an-mcp-server/) | Build | Python, TypeScript |
 | 08 | [Building an MCP Client: Discovery, Routing, and Dual-Era Fallback](phases/13-tools-and-protocols/08-building-an-mcp-client/) | Build | Python |
 | 09 | [MCP Transports: stdio and Stateless Streamable HTTP](phases/13-tools-and-protocols/09-mcp-transports/) | Learn | Python |
 | 10 | [MCP Resources and Prompts: Addressable Context for Stateless Servers](phases/13-tools-and-protocols/10-mcp-resources-and-prompts/) | Build | Python |
@@ -757,12 +766,22 @@ Twenty phases. Click any phase to expand its lesson list.
 | 25 | [Skill Invocation and Routing](phases/13-tools-and-protocols/25-skill-invocation-and-routing/) | Build | Python |
 | 26 | [Skill Permissions, Sandboxes, and Trust](phases/13-tools-and-protocols/26-skill-permissions-sandboxes-and-trust/) | Build | Python |
 | 27 | [Skill Evals, Packaging, and Portability](phases/13-tools-and-protocols/27-skill-evals-packaging-and-portability/) | Build | Python |
+| 28 | [MCP Tool Contracts and Content](phases/13-tools-and-protocols/28-mcp-tool-contracts-and-content/) | Build | Python |
+| 29 | [MCP Reliability, Cancellation, and Flow Control](phases/13-tools-and-protocols/29-mcp-reliability-cancellation-and-flow-control/) | Build | Python |
+| 30 | [MCP Registry Supply Chain: Admission, Drift, and Rollback](phases/13-tools-and-protocols/30-mcp-registry-supply-chain-and-drift/) | Build | Python |
+| 31 | [MCP Conformance Engineering: Versioning, Evidence, and Operations](phases/13-tools-and-protocols/31-mcp-conformance-versioning-and-operations/) | Build | Python |
 
-Lesson 23 is the tools-and-protocol integration capstone. Lessons 22 and 24-27
-form the focused [Agent Skills learning path](learning-paths/agent-skills.json),
-from package contract through real-host release gates. Start it with
-the host-specific `learn-agent-skills` invocation shown above; do not follow
-numeric next navigation from 22 to 23.
+Lessons 06-18 and 28-31 form the focused
+[MCP Engineering path](learning-paths/mcp-engineering.json). Its manifest order
+is 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 18, 17, 28, 29, 30, 31. Start
+it with the host-specific `learn-mcp-engineering` invocation above. Lesson 23
+is its only optional capstone and also requires Lessons 19 and 20.
+
+Lessons 22 and 24-27 form the focused
+[Agent Skills learning path](learning-paths/agent-skills.json), from package
+contract through real-host release gates. Start it with the host-specific
+`learn-agent-skills` invocation shown above; do not follow numeric next
+navigation from 22 to 23.
 
 </details>
 
@@ -1081,7 +1100,7 @@ reads a SKILL.md / AGENTS.md directory. Real tools, not homework.
 Two skill sets, two installers:
 
 **The learning skills** (`start-learning`, `learn`, `course-guide`,
-`learn-agent-skills`, `claude-certification`, `find-your-level`, and
+`learn-mcp-engineering`, `learn-agent-skills`, `claude-certification`, `find-your-level`, and
 `check-understanding`) live under [`skills/`](skills/) and install into a
 supported skill-capable host with one command. Installation needs Node.js and
 `npx`, but not a repository clone or Python:
@@ -1094,7 +1113,7 @@ npx skills add rohitg00/ai-engineering-from-scratch
 `.claude/skills/`, `.cursor/skills/`, `.codex/skills/`, or another supported
 skills folder. Verify that the selected host discovers that exact destination.
 
-**The lesson artifacts.** The repo ships 392 skills and 99 prompts under
+**The lesson artifacts.** The repo ships 396 skills and 99 prompts under
 `phases/**/outputs/`; install them via `scripts/install_skills.py`. Requires
 cloning the repo. Supports tag filters, dry-runs, and per-agent layouts:
 
@@ -1199,6 +1218,7 @@ HEAD/GET).
 | Know ML, new to deep learning | Phase 3 — Deep Learning Core | ~200 hours |
 | Know deep learning, want LLMs and agents | Phase 10 — LLMs from Scratch | ~100 hours |
 | Senior engineer, only want agent engineering | Phase 14 — Agent Engineering | ~60 hours |
+| Only want to build production MCP systems | [MCP Engineering path](learning-paths/mcp-engineering.json) | ~23 hours 15 min |
 | Only want to build production Agent Skills | [Agent Skills Engineering path](learning-paths/agent-skills.json) | ~9.5 hours |
 
 ```text
@@ -1274,7 +1294,7 @@ relative links inside lesson docs.
 
 ## Sponsor the work
 
-Free, MIT-licensed, 507 lessons. The curriculum is maintained on sponsorship alone. Cash only.
+Free, MIT-licensed, 511 lessons. The curriculum is maintained on sponsorship alone. Cash only.
 
 **Reach (verified 2026-05-14):** 55,593 monthly visitors · 90,709 page views · 7.5K stars ·
 Twitter/X is the #1 acquisition channel.

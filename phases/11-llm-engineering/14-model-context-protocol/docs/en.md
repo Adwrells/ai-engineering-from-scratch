@@ -225,6 +225,17 @@ The first line should report discovery of `demo-server` at protocol `2026-07-28`
 
 `outputs/skill-mcp-server-designer.md` turns a domain into a stateless MCP design. Its acceptance gate requires a discovery result, per-request metadata policy, deterministic cache-aware lists, explicit state handles, transport headers, authorization, and approval rules.
 
+## Continue the MCP Deep Dive
+
+This lesson gives you the protocol model. Phase 13 turns four production boundaries into separate build-and-verify lessons:
+
+1. [MCP Tool Contracts and Content](../../../13-tools-and-protocols/28-mcp-tool-contracts-and-content/docs/en.md) covers closed input schemas, structured content, routing metadata, opaque pagination, completion authorization, and the difference between protocol and tool-domain errors.
+2. [MCP Reliability, Cancellation, and Flow Control](../../../13-tools-and-protocols/29-mcp-reliability-cancellation-and-flow-control/docs/en.md) covers request cancellation, durable task cancellation, deadlines, idempotency, backpressure, proxy buffering, and reconnect behavior.
+3. [MCP Registry Supply Chain, Admission, Drift, and Rollback](../../../13-tools-and-protocols/30-mcp-registry-supply-chain-and-drift/docs/en.md) covers namespace proof, artifact provenance, immutable pins, live drift, Registry status, admission evidence, and rollback.
+4. [MCP Conformance Engineering](../../../13-tools-and-protocols/31-mcp-conformance-versioning-and-operations/docs/en.md) covers golden and negative wire transcripts, strict version eras, SDK differentials, proxy evidence, redaction, health gates, and release rollback.
+
+Follow them in order when the server will cross a team or trust boundary. Together they move from “the method works” to “the contract remains safe and diagnosable through deployment.”
+
 ## Exercises
 
 1. Add a `subtract` tool and confirm `tools/list` remains alphabetically ordered.

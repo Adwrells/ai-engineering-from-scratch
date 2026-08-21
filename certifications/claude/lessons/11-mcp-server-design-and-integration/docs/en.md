@@ -480,6 +480,17 @@ The first command must reproduce the shipped JSON artifact. The focused tests ch
 
 Use the discovery response and MRTR transcript as integration-contract evidence in the Developer and Architect capstones. A strong submission identifies the trust owner for each boundary, shows a retry reaching another instance, and explains why explicit application state is different from a removed protocol session.
 
+## Production Deep-Dive Routes
+
+Use the Phase 13 sequence when you need implementation evidence beyond the certification decision rules:
+
+- [Lesson 28: MCP Tool Contracts and Content](../../../../../phases/13-tools-and-protocols/28-mcp-tool-contracts-and-content/docs/en.md) for exact schemas, content blocks, pagination cursors, completion authorization, routing metadata, and error layers.
+- [Lesson 29: MCP Reliability, Cancellation, and Flow Control](../../../../../phases/13-tools-and-protocols/29-mcp-reliability-cancellation-and-flow-control/docs/en.md) for cancellation races, deadlines, idempotency, backpressure, proxy buffering, and reconnect recovery.
+- [Lesson 30: MCP Registry Supply Chain, Admission, Drift, and Rollback](../../../../../phases/13-tools-and-protocols/30-mcp-registry-supply-chain-and-drift/docs/en.md) for publisher namespace proof, provenance, immutable pins, live drift, Registry status, and safe rollback.
+- [Lesson 31: MCP Conformance Engineering](../../../../../phases/13-tools-and-protocols/31-mcp-conformance-versioning-and-operations/docs/en.md) for version-era transcripts, SDK differentials, proxy evidence, redaction, health gates, and release decisions.
+
+The certification lesson tells you who owns each boundary. These lessons make you prove what crossed it.
+
 ## Exam Decision Rules
 
 - Host owns model interaction and consent. Client speaks the protocol. Server owns capability execution and server-side authorization.

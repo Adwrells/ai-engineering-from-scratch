@@ -319,7 +319,7 @@ Total estimated time: ~323 hours, at your own pace.
 | 24 | [Multimodal RAG and Cross-Modal Retrieval](phases/12-multimodal-ai/24-multimodal-rag-cross-modal) | ✅ | ~180 min |
 | 25 | [Multimodal Agents and Computer-Use (Capstone)](phases/12-multimodal-ai/25-multimodal-agents-computer-use) | ✅ | ~240 min |
 
-## Phase 13: Tools & Protocols — ✅ (~36 hours)
+## Phase 13: Tools & Protocols — ✅ (~43 hours)
 
 | # | Lesson | Status | Est. |
 |---|--------|--------|------|
@@ -350,6 +350,10 @@ Total estimated time: ~323 hours, at your own pace.
 | 25 | [Skill Invocation and Routing](phases/13-tools-and-protocols/25-skill-invocation-and-routing/) | ✅ | ~105 min |
 | 26 | [Skill Permissions, Sandboxes, and Trust](phases/13-tools-and-protocols/26-skill-permissions-sandboxes-and-trust/) | ✅ | ~120 min |
 | 27 | [Skill Evals, Packaging, and Portability](phases/13-tools-and-protocols/27-skill-evals-packaging-and-portability/) | ✅ | ~150 min |
+| 28 | [MCP Tool Contracts and Content](phases/13-tools-and-protocols/28-mcp-tool-contracts-and-content/) | ✅ | ~120 min |
+| 29 | [MCP Reliability, Cancellation, and Flow Control](phases/13-tools-and-protocols/29-mcp-reliability-cancellation-and-flow-control/) | ✅ | ~120 min |
+| 30 | [MCP Registry Supply Chain: Admission, Drift, and Rollback](phases/13-tools-and-protocols/30-mcp-registry-supply-chain-and-drift/) | ✅ | ~90 min |
+| 31 | [MCP Conformance Engineering: Versioning, Evidence, and Operations](phases/13-tools-and-protocols/31-mcp-conformance-versioning-and-operations/) | ✅ | ~100 min |
 
 ## Phase 14: Agent Engineering — ✅ (~42 hours)
 
@@ -615,6 +619,6 @@ Total estimated time: ~323 hours, at your own pace.
 
 ---
 
-**Total: 20 phases, 507 lessons | 507 complete | ~1,059 hours estimated**
+**Total: 20 phases, 511 lessons | 511 complete | ~1,066 hours estimated**
 
 Want to help? Pick any ⬚ lesson and submit a PR. See [CONTRIBUTING.md](CONTRIBUTING.md).

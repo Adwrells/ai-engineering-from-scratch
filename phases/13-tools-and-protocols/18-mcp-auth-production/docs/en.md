@@ -1,8 +1,8 @@
-# MCP Auth in Production — Enrollment, JWKS Refresh, Audience-Pinned Tokens
+# MCP Auth in Production: Issuer-Bound Enrollment and Tokens
 
-> Lesson 16 stood up the OAuth 2.1 state machine in memory. By 2026, every MCP server you ship to a real org sits behind production auth: client enrollment that scales to an unbounded client population (Client ID Metadata Documents first, dynamic client registration as a backwards-compatible fallback), authorization-server metadata discovery (RFC 8414 *or* OpenID Connect Discovery), JWKS cache refresh that does not break a 3 a.m. token validation, and audience-pinned tokens that refuse cross-resource replay. This lesson models the full surface with three roles — an authorization server, a resource server (the MCP server), and a client — so you can trace every hop from discovery to a validated tool call.
+> Lesson 16 built the OAuth 2.1 state machine. This lesson hardens its production boundaries for MCP 2026-07-28: Client ID Metadata Documents first, deprecated dynamic registration only for compatibility, authorization-response issuer validation, issuer-keyed client credentials, JWKS refresh, and audience-pinned tokens on every stateless request.
 >
-> **Spec note (2025-11-25):** the November 2025 MCP authorization spec demoted Dynamic Client Registration from `SHOULD` to `MAY` and made **Client ID Metadata Documents (CIMD)** the recommended default enrollment mechanism. This lesson teaches both, in the spec's priority order, and the code keeps DCR for the walk-through because it is fully self-contained in one process.
+> **Spec note (2026-07-28):** Dynamic Client Registration is deprecated in favor of Client ID Metadata Documents. DCR remains a compatibility mechanism. When it is used, the client declares the correct `application_type`. A client validates a present RFC 9207 `iss` value and never reuses credentials across authorization-server issuers.
 
 **Type:** Build
 **Languages:** Python (stdlib)
@@ -12,17 +12,18 @@
 ## Learning Objectives
 
 - Discover an authorization server through RFC 8414 metadata and verify the contract.
-- Implement RFC 7591 dynamic client registration so MCP clients enroll without admin intervention.
+- Enroll through a Client ID Metadata Document and isolate deprecated DCR as a fallback.
+- Validate RFC 9207 `iss`, key registrations by authorization-server issuer, and key resource-bound tokens by issuer plus resource.
 - Cache and refresh JWKS keys on a schedule so signature verification survives key roll-over.
 - Pin tokens to a single MCP resource using RFC 8707 resource indicators and refuse confused-deputy reuse.
-- Separate the three roles cleanly — authorization server, resource server, client — so each enforces only the checks that belong to it.
-- Read an IdP capability matrix and refuse to deploy when the IdP cannot satisfy MCP's auth profile.
+- Separate the authorization server, resource server, and client so each enforces only its own checks.
+- Audit an authorization server against a deployment checklist and refuse unsafe enrollment or token reuse.
 
 ## The Problem
 
 The Lesson 16 simulator runs OAuth 2.1 in memory. Production has three operational gaps that a memory-only simulator does not see.
 
-The first gap is enrollment. A real org runs hundreds of MCP servers and thousands of MCP clients. Operators do not hand-register every Cursor user as an OAuth client. The 2025-11-25 spec gives clients a priority order for solving this: use a pre-registered `client_id` if you have one, else use a **Client ID Metadata Document** (the client identifies itself with an HTTPS URL it controls and the authorization server *pulls* the metadata), else fall back to **RFC 7591 dynamic client registration** (the client *pushes* a `POST /register` and receives a `client_id` on the spot), else prompt the user. CIMD is the recommended default because it removes per-server registration entirely while keeping a DNS-rooted trust model; DCR is retained for backwards compatibility. Both discover their entry points from the authorization server's metadata: `client_id_metadata_document_supported` for CIMD, `registration_endpoint` for DCR.
+The first gap is enrollment and credential isolation. A real org may run hundreds of MCP servers and thousands of MCP clients. The 2026-07-28 revision prefers a **Client ID Metadata Document**: the client uses an HTTPS URL with a path that it controls as its identifier, and the authorization server pulls the metadata. RFC 7591 dynamic registration remains only as a deprecated compatibility path. When DCR is unavoidable, the request declares the correct `application_type`. The client stores registrations under the authorization-server issuer and access tokens under the `(issuer, resource)` pair. A changed issuer means a new enrollment, and a different resource means a separately audience-bound token.
 
 The second gap is key rotation. JWT validation depends on the authorization server's signing keys, published as a JSON Web Key Set (JWKS). The authorization server rotates these on a schedule (often hourly, sometimes faster under incident response). An MCP server that fetches JWKS once at boot validates fine until the rotation window — then every request fails until restart. Production wires JWKS as a cached value with a refresh job that overwrites the cache before the previous keys expire, plus a fall-back fetch on cache miss for the case where a token signed by a key newer than the cache arrives.
 
@@ -42,7 +43,9 @@ A document at `/.well-known/oauth-authorization-server` describes everything a c
   "authorization_endpoint": "https://auth.example.com/authorize",
   "token_endpoint": "https://auth.example.com/token",
   "jwks_uri": "https://auth.example.com/.well-known/jwks.json",
+  "client_id_metadata_document_supported": true,
   "registration_endpoint": "https://auth.example.com/register",
+  "authorization_response_iss_parameter_supported": true,
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code", "refresh_token"],
   "code_challenge_methods_supported": ["S256"],
@@ -53,11 +56,14 @@ A document at `/.well-known/oauth-authorization-server` describes everything a c
 
 A client given an MCP resource URL chains discovery: `oauth-protected-resource` from RFC 9728 (the resource server's document) names the issuer, then `oauth-authorization-server` (this RFC) names every endpoint. The client never hard-codes an authorization URL.
 
+For a resource identifier with a path, insert the well-known segment before that path. For example, `https://mcp.example.com/team/server` resolves protected-resource metadata at `https://mcp.example.com/.well-known/oauth-protected-resource/team/server`. Appending `/.well-known/...` after the resource path is incorrect.
+
 The contract you verify before trusting an IdP for MCP:
 
 - `code_challenge_methods_supported` includes `S256` (PKCE per RFC 7636). The spec is explicit: if this field is **absent**, the authorization server does not support PKCE and the client **MUST** refuse to proceed.
 - `grant_types_supported` includes `authorization_code` and rejects `password` and `implicit`.
-- At least one enrollment path is advertised: `client_id_metadata_document_supported: true` (CIMD, preferred) **or** `registration_endpoint` (RFC 7591 DCR, fallback). Either satisfies the contract; you no longer hard-require DCR.
+- At least one enrollment path is available: `client_id_metadata_document_supported: true` (CIMD, preferred), a pre-registered client, or `registration_endpoint` (deprecated RFC 7591 compatibility).
+- If `authorization_response_iss_parameter_supported` is true, the client requires the returned RFC 9207 `iss` and compares it exactly with the issuer recorded before redirecting.
 - `response_types_supported` is exactly `["code"]` for OAuth 2.1.
 
 If `S256` is missing, the MCP server refuses to deploy against this IdP — there is no degraded mode for PKCE. If *neither* enrollment path is advertised and you have no pre-registered `client_id`, you also cannot enroll; the deployment manifest is wrong, not the code.
@@ -87,6 +93,7 @@ The metadata document the client hosts:
   "client_id": "https://app.example.com/oauth/client.json",
   "client_name": "Example MCP Client",
   "client_uri": "https://app.example.com",
+  "application_type": "native",
   "redirect_uris": ["http://127.0.0.1:7333/callback", "http://localhost:7333/callback"],
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
@@ -96,6 +103,8 @@ The metadata document the client hosts:
 
 The `client_id` value in the document **MUST** equal the URL it is served from (the authorization server verifies this; mismatches are rejected). The authorization server advertises support with `client_id_metadata_document_supported: true` in its RFC 8414 metadata.
 
+For the current CIMD contract, `client_id`, `client_name`, and a non-empty `redirect_uris` array are required. The client identifier is an absolute HTTPS URL with a path. `application_type` may be included, but it is not a mandatory CIMD field. Do not copy the DCR requirement for `application_type` into the preferred CIMD path.
+
 Two security facts the spec is blunt about:
 
 - **SSRF.** The authorization server fetches an attacker-supplied URL. It must defend against server-side request forgery (no fetches to internal/admin endpoints).
@@ -103,15 +112,18 @@ Two security facts the spec is blunt about:
 
 Because CIMD needs no server-side state, there is no registrar to stand up the way DCR requires. The client side is read-only: serve your metadata document from a static HTTPS endpoint and let the authorization server pull it.
 
-### RFC 7591 — Dynamic Client Registration (fallback / backwards compatibility)
+If the authorization server operator has already provisioned a client identifier, use that issuer-scoped registration before trying automatic enrollment. Otherwise prefer CIMD. Use deprecated DCR only when the issuer cannot use either pre-registration or CIMD.
 
-DCR is now a `MAY`, kept for backwards compatibility with pre-2025-11-25 deployments and IdPs that do not yet support CIMD. Without it (and without CIMD or pre-registration), every MCP client (Cursor, Claude Desktop, a custom agent) needs an out-of-band exchange with the IdP admin. With DCR, the client posts:
+### RFC 7591: deprecated compatibility enrollment
+
+DCR is deprecated in the 2026-07-28 revision. Keep it only for authorization servers that cannot consume CIMD and where pre-registration is impractical. A compatibility client posts:
 
 ```json
 POST /register
 Content-Type: application/json
 
 {
+  "application_type": "native",
   "redirect_uris": ["http://127.0.0.1:7333/callback"],
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
@@ -136,7 +148,7 @@ The server responds with `client_id` and a `registration_access_token` for later
 }
 ```
 
-`token_endpoint_auth_method: none` is the right default for MCP clients that run on the user's device. They get a `client_id` only — no `client_secret` to exfiltrate. PKCE provides the proof-of-possession that public clients need.
+`application_type` is not decorative. A loopback desktop client declares `native`; a server-hosted client declares `web` and uses HTTPS redirect URIs. `token_endpoint_auth_method: none` is the right default for a public native client. It gets a `client_id` only, with PKCE providing the proof-of-possession.
 
 Three production pitfalls:
 
@@ -152,34 +164,36 @@ Lesson 16 established the shape. The production rule: every token request includ
 
 PKCE is mandatory in OAuth 2.1. The lesson's authorization-code flow always carries `code_challenge` and `code_verifier`. The server rejects any token request without a verifier or with a verifier that does not hash to the stored challenge.
 
-### MCP Spec 2025-11-25 Auth Profile
+### MCP 2026-07-28 authorization profile
 
-The MCP spec (2025-11-25) is precise about what an MCP server's authorization layer must do:
+The current MCP revision keeps the OAuth resource-server boundary while making MCP transport stateless. There is no protocol session on which to cache an identity decision. The authorization layer therefore validates each request independently:
 
 - Implement RFC 9728 protected-resource metadata, and provide its location either through the `WWW-Authenticate: Bearer resource_metadata="..."` header on a 401 **or** the well-known URI `/.well-known/oauth-protected-resource` (SEP-985 made the header optional with a well-known fallback). The metadata `authorization_servers` field **MUST** name at least one server.
 - Accept tokens only via `Authorization: Bearer ...` on **every** request — never in a query string, never validated only at session start.
 - Validate `aud`, `iss`, `exp`, and required scopes per request. The server **MUST** validate that the token was issued specifically for it (audience); a missing or mismatched `aud` is rejected, never treated as wildcard.
 - On 401/403, return `WWW-Authenticate: Bearer` carrying `error=...`, the `resource_metadata="<PRM-URL>"` parameter (the URL of the metadata document, *not* the bare resource), and `scope="..."` on `insufficient_scope` (403). Note: the parameter is `resource_metadata`, a discovery pointer — there is no `resource` parameter in the challenge.
 - Authorization-server discovery accepts **either** RFC 8414 OAuth metadata **or** OpenID Connect Discovery 1.0; clients must try both well-known suffixes in priority order.
-- The client (not the server) defends against **mix-up attacks**: it records the expected `issuer` before redirecting and validates the `iss` authorization-response parameter (RFC 9207) before redeeming the code. PKCE alone does not stop mix-up, because the client hands its `code_verifier` to whatever token endpoint it was steered to.
+- The client (not the server) defends against **mix-up attacks**: it records the expected `issuer` before redirecting and validates the `iss` value returned in the actual authorization response (RFC 9207) before redeeming the code. PKCE alone does not stop mix-up, because the client hands its `code_verifier` to whatever token endpoint it was steered to.
+- A client credential belongs to one authorization-server issuer. If discovery resolves to a different issuer, the client re-enrolls instead of presenting the old `client_id`, registration token, or access token.
+- CIMD is the preferred enrollment mechanism. DCR is deprecated; a compatibility DCR request still declares the correct `application_type`.
 
 The OAuth 2.1 draft is the substrate; RFC 8414/7591/8707/9728/9207 + RFC 7636 + CIMD are the surface; the MCP spec is the profile.
 
-### IdP capability matrix
+### Deployment capability checklist
 
-Not every IdP supports the full MCP profile. The matrix below documents factual capability statements as of the 2025-11-25 spec. It is a *deployment gate*, not a recommendation.
+Vendor feature tables become stale quickly. Inspect the metadata returned by the authorization server you will actually deploy instead. The gate is mechanical:
 
-CIMD shipped in the 2025-11-25 spec and the underlying OAuth draft was adopted only in October 2025, so vendor support is still arriving — treat "CIMD" below as "where it stands today, verify in your tenant," not a permanent statement.
+| Check | Required decision |
+|---|---|
+| Discovered issuer | Exact HTTPS issuer expected by policy |
+| PKCE | `S256` advertised; otherwise stop |
+| Enrollment | CIMD preferred, pre-registration accepted, DCR only as deprecated compatibility |
+| Authorization response | Validate RFC 9207 `iss` when present or advertised |
+| Resource binding | Token request carries `resource`; resource server requires the matching `aud` |
+| Credential storage | Key client IDs and registration credentials by issuer; key access tokens by issuer plus resource |
+| DCR compatibility | Declare `native` or `web`; reject redirect URIs that do not fit the declared application type |
 
-| IdP category | AS metadata (8414/OIDC) | CIMD | RFC 7591 DCR | RFC 8707 resource | RFC 7636 S256 PKCE | Notes |
-|---|---|---|---|---|---|---|
-| Self-hosted (Keycloak) | yes | emerging | yes | yes (since 24.x) | yes | Reference IdP for the MCP profile in this lesson; full DCR path end-to-end, CIMD tracking the new spec. |
-| Enterprise SSO (Microsoft Entra ID) | yes | emerging | yes (premium tiers) | yes | yes | DCR availability differs by tenant tier; verify in target tenant before deploying. |
-| Enterprise SSO (Okta) | yes | emerging | yes (Okta CIC / Auth0) | yes | yes | DCR available on Auth0 (now Okta CIC); classic Okta orgs require admin pre-registration. |
-| Social login IdPs (generic) | varies | no | rarely | rarely | yes | Most social IdPs treat clients as static partners; no self-service enrollment. Use as identity source only, layer your own MCP-aware authorization server on top. |
-| Custom / homegrown | depends | depends | depends | depends | depends | If you ship your own, ship the full profile and prefer CIMD. Skipping PKCE or audience binding breaks the MCP auth contract. |
-
-Refusal rule for the deployment manifest: if the chosen IdP does not list `S256` in `code_challenge_methods_supported`, the MCP server refuses to start — PKCE has no degraded mode. Enrollment is a softer gate: you need *one* working path (a pre-registered `client_id`, `client_id_metadata_document_supported: true`, or a `registration_endpoint`). DCR's absence alone is no longer a refusal trigger, because CIMD or pre-registration can cover it.
+Do not infer support from a product name or pricing tier. Capture the discovered document in deployment evidence and fail closed when a mandatory field is absent.
 
 ### JWKS refresh pattern (rotate at the AS, refresh at the resource server)
 
@@ -254,6 +268,7 @@ PKCE alone does not stop mix-up, because the client hands its `code_verifier` to
 - **Scope upgrade race.** Two concurrent step-up flows for the same user can both succeed and produce two access tokens with different scopes. The validator must use the token presented on the request, not look up "the user's current scope" — that creates a TOCTOU window.
 - **Registration token theft.** A leaked `registration_access_token` lets the attacker rewrite redirect URIs. Hash these at rest; require the client to present the cleartext on every update; rotate on suspicion.
 - **`iss` not pinned.** A validator that accepts any `iss` lets an attacker stand up their own authorization server, register a client for the target audience, and issue tokens. The protected-resource metadata's `authorization_servers` list is the allow-list; enforce it.
+- **Credential or token cache collision.** A client that keys registrations only by resource can present one authorization server's identity to another. A client that keys access tokens only by issuer can replay a token at the wrong audience. Key registrations by validated issuer, key access tokens by `(issuer, resource)`, and re-enroll whenever the issuer changes.
 
 ```figure
 t3-jwks-rotate
@@ -261,12 +276,24 @@ t3-jwks-rotate
 
 ## Use It
 
-`code/main.py` walks the full production flow with stdlib Python and three roles — `AuthorizationServer`, `ResourceServer`, and `Client`. The flow:
+`code/main.py` walks the full production flow with stdlib Python and three roles: `AuthorizationServer`, `ResourceServer`, and `Client`. The flow:
+
+From the repository root, run:
+
+```bash
+cd phases/13-tools-and-protocols/18-mcp-auth-production
+python3 code/main.py
+python3 -m unittest discover -s code/tests -v
+```
+
+The first command prints the issuer-bound enrollment and token-validation
+transcript. The second reports eighteen passing checks. Neither command opens a
+network listener or writes credentials.
 
 1. Authorization server publishes RFC 8414 metadata at `/.well-known/oauth-authorization-server`.
 2. MCP client calls the metadata endpoint and checks its enrollment options (`client_id_metadata_document_supported` for CIMD, `registration_endpoint` for DCR) and `S256` PKCE support.
-3. The walk-through takes the DCR fallback path: the client posts to `/register` (RFC 7591) and receives a `client_id`. (A CIMD client would instead present its own HTTPS `client_id` URL and skip this step.)
-4. MCP client runs PKCE-protected authorization code flow (RFC 7636) with `resource` indicator (RFC 8707).
+3. The client checks for an issuer-scoped pre-registration, otherwise enrolls with its HTTPS Client ID Metadata Document. Deprecated DCR remains a separately testable compatibility method.
+4. The client records the validated issuer, creates an S256 challenge, receives a one-time authorization code plus `iss`, validates that returned issuer, and redeems the code with the original verifier and RFC 8707 `resource` indicator.
 5. MCP client calls a tool on the MCP server with `Authorization: Bearer ...`.
 6. MCP server runs `validate`, resolving the signing key from the JWKS cache.
 7. The IdP rotates a key; the scheduled refresh re-pulls the JWKS into the cache.
@@ -289,19 +316,19 @@ This lesson produces `outputs/skill-mcp-auth.md`. Given an MCP server config and
 
 4. Read RFC 7591 and identify two fields the lesson's `/register` handler does not validate. Add the validation. (Hint: `software_statement` and `redirect_uris` URI scheme.)
 
-5. Add a Client ID Metadata Document path. Serve a `client.json` whose `client_id` equals its own URL, and have the authorization server fetch and verify it (reject if `client_id` ≠ URL). Confirm a CIMD client enrolls with no `register_client` call.
+5. Add a second authorization server. Confirm the client stores a separate issuer-keyed enrollment and refuses to reuse the first issuer's token or `client_id`.
 
 6. Prove the DoS fix. Send the validator a token with a random `kid` and confirm `refresh_jwks` runs at most once and the authorization server's key count does not grow. Then deliberately re-wire the fall-back to a rotate-and-mint and watch the key count climb per bogus token — restore the re-fetch afterward.
 
-7. Implement the client-side RFC 9207 `iss` check from the mix-up section: record the expected issuer before the authorization request, then reject an authorization response whose `iss` does not match.
+7. Exercise deprecated DCR with both `native` and `web` clients. Confirm a web client with an HTTP redirect URI and a native client without an exact loopback redirect are rejected.
 
 ## Key Terms
 
 | Term | What people say | What it actually means |
 |------|----------------|------------------------|
 | ASM | "OAuth metadata document" | RFC 8414 `/.well-known/oauth-authorization-server` JSON |
-| CIMD | "Client metadata URL" | Client ID Metadata Document — an HTTPS URL used as the `client_id`; the AS pulls the JSON. Recommended default since 2025-11-25 |
-| DCR | "Self-service client registration" | RFC 7591 `POST /register` flow; demoted to a `MAY` fallback in 2025-11-25 |
+| CIMD | "Client metadata URL" | Client ID Metadata Document: an HTTPS URL used as the `client_id`; the AS pulls the JSON. Preferred enrollment in MCP 2026-07-28 |
+| DCR | "Self-service client registration" | RFC 7591 `POST /register`; deprecated for current MCP and retained only for compatibility |
 | JWKS | "Public keys for JWT validation" | JSON Web Key Set, fetched from `jwks_uri`, indexed by `kid` |
 | Rotate vs refresh | "Updating the keys" | *Rotate* = AS mints/retires signing keys; *refresh* = resource server re-fetches the published set. Resource servers only ever refresh |
 | Resource indicator | "Audience parameter" | RFC 8707 `resource` parameter pinning the token to one server |
@@ -316,9 +343,8 @@ This lesson produces `outputs/skill-mcp-auth.md`. Given an MCP server config and
 
 ## Further Reading
 
-- [MCP — Authorization spec (2025-11-25)](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) — the MCP auth profile this lesson implements
-- [MCP blog — One Year of MCP: November 2025 Spec Release](https://blog.modelcontextprotocol.io/posts/2025-11-25-first-mcp-anniversary/) — what changed in 2025-11-25 (CIMD, XAA, DCR demotion)
-- [Aaron Parecki — Client Registration in the November 2025 MCP Authorization Spec](https://aaronparecki.com/2025/11/25/1/mcp-authorization-spec-update) — the CIMD-over-DCR rationale
+- [MCP authorization specification (2026-07-28)](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) - the current MCP authorization profile
+- [MCP 2026-07-28 changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog) - CIMD, issuer validation, DCR deprecation, and issuer-keyed credential changes
 - [OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document-00)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00) — CIMD
 - [RFC 8414 — OAuth 2.0 Authorization Server Metadata](https://datatracker.ietf.org/doc/html/rfc8414) — discovery contract
 - [RFC 7591 — OAuth 2.0 Dynamic Client Registration Protocol](https://datatracker.ietf.org/doc/html/rfc7591) — DCR (fallback path)

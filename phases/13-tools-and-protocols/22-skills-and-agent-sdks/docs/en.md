@@ -15,6 +15,167 @@
 - Validate a skill package before a runtime places it in an agent's catalog.
 - Choose between a skill, MCP tool, hook, subagent, or ordinary code for a concrete task.
 
+## Ten-Minute First Success
+
+Do this before the long explanation. You will create a small skill, install
+the complete reviewer bundle into a real agent host, invoke it, verify the
+result, and remove it. This proves the lifecycle with an observable result.
+
+### Preflight for the real-host lab
+
+The real-host checkpoint requires Node.js, `npx`, Python 3, one selected
+skill-capable host, and write access to the project or user scope you choose in
+the installer. Verify the local commands first:
+
+```bash
+node --version
+npx --version
+python3 --version
+```
+
+Decide which host and scope you will use before installation. If any
+requirement is unavailable, read this lesson on the website or continue with
+the manual package exercise below. That fallback teaches the contract, but it
+does not prove host discovery, invocation, bundled-script execution, or
+uninstall behavior. Keep those observations marked pending.
+
+### 1. Start in an empty working directory
+
+Run these commands from any parent directory where you keep learning work:
+
+```bash
+mkdir -p agent-skills-first-run
+cd agent-skills-first-run
+TARGET_ROOT="$(pwd -P)"
+printf 'TARGET_ROOT=%s\n' "$TARGET_ROOT"
+ls -A
+```
+
+The final command should print nothing. If it prints files, choose a different
+empty directory so the review has a clear boundary.
+
+Create a directory for your first skill:
+
+```bash
+mkdir -p my-first-skill
+```
+
+Create `my-first-skill/SKILL.md` with this content:
+
+```markdown
+---
+name: my-first-skill
+description: Turn rough meeting notes into a compact decision record when the user asks to capture a technical decision.
+---
+
+# Decision record
+
+Extract the decision, context, alternatives, owner, and next review date.
+If the notes do not contain a decision, ask one clarifying question instead
+of inventing one.
+```
+
+Verify that you created the file in the intended directory:
+
+```bash
+test -f my-first-skill/SKILL.md
+```
+
+No output and exit code 0 means the file exists.
+
+### 2. Install the complete reviewer bundle
+
+Stay in `agent-skills-first-run` and run:
+
+```bash
+npx skills add rohitg00/ai-engineering-from-scratch --skill skill-contract-reviewer --full-depth
+```
+
+Choose the agent host and scope you are using. The installer should list
+`skill-contract-reviewer` and the destination it wrote. `--full-depth` is
+required because this lesson's skill is a nested bundle with references, a
+script, and an asset.
+
+Set `SKILL_ROOT` to the absolute directory reported by the installer. It must
+be the directory containing the installed `SKILL.md`, not the lesson source
+directory and not the current workspace:
+
+```bash
+# Replace the placeholder with the destination printed by the installer.
+SKILL_ROOT="$(cd "/absolute/path/to/skill-contract-reviewer" && pwd -P)"
+test -f "$SKILL_ROOT/SKILL.md"
+printf 'SKILL_ROOT=%s\n' "$SKILL_ROOT"
+```
+
+If the agent session was already open, start a new session or use that host's
+skill rescan command. Do not assume every host hot-reloads its catalog.
+
+### 3. Invoke it explicitly
+
+In the installed agent, with `agent-skills-first-run` as the working
+directory, use the syntax supported by that host:
+
+| Host | Explicit invocation |
+|---|---|
+| Codex | `$skill-contract-reviewer`, or choose it from `/skills`, then provide the review request |
+| Claude Code | `/skill-contract-reviewer` followed by the review request |
+| Portable fallback | `Use skill-contract-reviewer to review the target package.` |
+
+Use the absolute values printed for `SKILL_ROOT` and `TARGET_ROOT` in the
+request. Require the host to expand them before execution and show the exact
+resolved command, not a command that depends on the process working directory:
+
+```text
+Use skill-contract-reviewer to review <TARGET_ROOT>/my-first-skill. The installed bundle root is <SKILL_ROOT>. Run python3 <SKILL_ROOT>/scripts/check_skill.py <TARGET_ROOT>/my-first-skill. Before running it, show the fully resolved argv. Return the validation report, selected primitives, and one sentence for each selection. Include the resolved script path, resolved target path, cwd, argv, and exit code as execution evidence.
+```
+
+The resolved command should have this shape, with no placeholders remaining:
+
+```bash
+python3 "/absolute/install/path/skill-contract-reviewer/scripts/check_skill.py" \
+  "/absolute/workspace/path/agent-skills-first-run/my-first-skill"
+```
+
+A successful result has all three properties:
+
+1. The host finds `skill-contract-reviewer` by name.
+2. The reviewer reads the package contract and runs its bundled validator.
+3. The response contains a validation report with no structural error for the
+   sample, plus a justified primitive selection.
+
+The execution evidence must also name the script path, target path, cwd, exact
+argument vector, and exit code. A fluent report without those fields does not
+prove that the installed companion script ran.
+
+If the host reports that the skill is unavailable, verify the install
+destination, rescan or restart once, and retry the explicit request. Do not
+rewrite the skill description to hide an installation failure.
+
+### 4. Probe implicit selection
+
+Start a fresh agent turn and enter the same task without naming the skill:
+
+```text
+Review <TARGET_ROOT>/my-first-skill as a reusable agent package and tell me whether its package contract is valid.
+```
+
+If the host exposes selected skills, record whether it chose
+`skill-contract-reviewer`. If the host does not expose routing, mark implicit
+selection as unverified. The explicit invocation is the portable fallback.
+
+### 5. Clean up
+
+Remove only the installed reviewer bundle:
+
+```bash
+npx skills remove skill-contract-reviewer
+```
+
+Select the same host and scope used during installation. After a rescan or new
+session, an explicit request for `skill-contract-reviewer` should report that
+it is unavailable. Keep `my-first-skill` for the later lessons, or remove the
+lab directory after you finish the track.
+
 ## The Problem
 
 Suppose your team has a reliable release workflow. It finds merged changes, checks migration notes, updates the changelog, runs a packaging command, and produces a review checklist.
@@ -224,10 +385,14 @@ The chooser exposes `TaskShape` and `select_primitives(task)`. It maps a task's 
 Run the lab:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"
 cd phases/13-tools-and-protocols/22-skills-and-agent-sdks
 python3 code/main.py
 python3 -m unittest discover -s code/tests -v
 ```
+
+This command block requires a local clone and must start from anywhere inside
+that clone so `git rev-parse --show-toplevel` can resolve the repository root.
 
 The demo prints JSON for one valid portable skill, one host-extended skill, one invalid package, and several task-shape decisions. Inspect the issue codes. A package validator should explain how to fix an artifact without guessing on the author's behalf.
 
@@ -273,8 +438,13 @@ This lesson produces the `skill-contract-reviewer` bundle under `outputs/`. It c
 Install the full bundle, not only its entry file:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"
 python3 scripts/install_skills.py /tmp/aiefs-skills --phase 13 --type skill
 ```
+
+The course installer reports each copied Phase 13 skill and writes
+`/tmp/aiefs-skills/manifest.json`. This clean destination checks package shape;
+the first-success loop above checks discovery and invocation in a real host.
 
 The following lessons deepen each lifecycle stage. Lesson 24 builds discovery and progressive disclosure. Lesson 25 builds invocation policy and routing. Lesson 26 separates permissions from sandboxing. Lesson 27 turns the whole package into an evaluated release artifact.
 

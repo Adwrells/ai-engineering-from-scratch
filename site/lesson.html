@@ -1887,7 +1887,7 @@
   <script src="build-meta.js"></script>
   <script src="langs.js?v=20260802a"></script>
   <script src="lang-picker.js?v=20260808d"></script>
-  <script src="data.js?v=20260808g"></script>
+  <script src="data.js?v=20260821a"></script>
   <script>
     (function () {
       var path = '';
@@ -1908,7 +1908,7 @@
       });
     }());
   </script>
-  <script src="content-source.js?v=20260808d"></script>
+  <script src="content-source.js?v=20260821a"></script>
   <script src="progress.js?v=20260801a"></script>
   <script src="header.js?v=20260808h" defer></script>
   <script src="cmdpalette.js?v=20260808h" defer></script>
@@ -3866,14 +3866,16 @@
       }
 
       function lessonFileViewUrl(file) {
+        var filePath = file && (file.path || file.file);
         if (file && file.html_url) return file.html_url;
-        if (file && file.path && window.AIFSContentSource) return window.AIFSContentSource.repoUrl(file.path);
-        return REPO_TREE + (file && file.path ? file.path : lessonPath);
+        if (filePath && window.AIFSContentSource) return window.AIFSContentSource.repoUrl(filePath);
+        return REPO_TREE + (filePath || lessonPath);
       }
 
       function lessonFileSourceUrl(file) {
+        var filePath = file && (file.path || file.file);
         if (file && file.download_url) return file.download_url;
-        if (file && file.path && window.AIFSContentSource) return window.AIFSContentSource.repoUrl(file.path);
+        if (filePath && window.AIFSContentSource) return window.AIFSContentSource.repoUrl(filePath);
         return '';
       }
 
@@ -3903,16 +3905,28 @@
 
         var html = '<div class="output-cards">';
         data.forEach(function (file, idx) {
-          var type = classifyOutput(file.name);
+          var type = file.kind || classifyOutput(file.name);
           var badgeClass = type;
-          var badgeText = type === 'prompt' ? 'Prompt' : type === 'skill' ? 'Skill' : 'Output';
+          var badgeText = type === 'prompt' ? 'Prompt' : type === 'skill' ? (file.bundle ? 'Skill bundle' : 'Skill') : 'Output';
           var installId = 'install-hint-' + idx;
           var installHint = '';
           var viewUrl = lessonFileViewUrl(file);
+          var viewLabel = file.bundle ? 'Open SKILL.md' : 'Open file';
+          var bundleUrl = '';
+          var bundleLabel = '';
+          if (file.bundle && file.bundlePath) {
+            var source = window.AIFSContentSource;
+            bundleUrl = source && typeof source.isLocal === 'function' && source.isLocal()
+              ? source.repoUrl(file.bundlePath + '/')
+              : REPO_TREE + file.bundlePath;
+            bundleLabel = 'Browse bundle (' + (Array.isArray(file.files) ? file.files.length : 0) + ' files)';
+          }
           if (type === 'prompt') {
             installHint = 'Paste into Claude, Cursor, Codex, OpenClaw, Hermes, or any agent that reads prompts';
           } else if (type === 'skill') {
-            var skillName = file.name.replace(/\.md$/, '').replace(/^skill-/, '');
+            var skillName = file.kind === 'skill'
+              ? file.name
+              : file.name.replace(/\.md$/, '').replace(/^skill-/, '');
             installHint = 'npx skills add rohitg00/ai-engineering-from-scratch --skill ' + skillName;
           }
 
@@ -3921,7 +3935,10 @@
           html += '<div class="output-card-name">' + escapeHtml(file.name) + '</div>';
           html += '<div class="output-desc" id="desc-' + idx + '">' + escapeHtml(file.description || file.name) + '</div>';
           html += '<div class="output-actions">';
-          html += '<a class="output-btn" href="' + escapeAttr(viewUrl) + '" target="_blank" rel="noopener">Open file</a>';
+          html += '<a class="output-btn" href="' + escapeAttr(viewUrl) + '" target="_blank" rel="noopener">' + viewLabel + '</a>';
+          if (bundleUrl) {
+            html += '<a class="output-btn" href="' + escapeAttr(bundleUrl) + '" target="_blank" rel="noopener">' + escapeHtml(bundleLabel) + '</a>';
+          }
           if (installHint) {
             html += '<button class="output-btn" onclick="var h=document.getElementById(\'' + installId + '\');h.classList.toggle(\'visible\')">Install</button>';
           }
@@ -3959,11 +3976,17 @@
 
         repositoryDirectoryFetch(lessonPath + '/outputs', function (err, data) {
           if (!outputsEl || !outputsEl.parentNode) return;
-          if (err || !data || !Array.isArray(data) || data.length === 0) {
+          var source = window.AIFSContentSource;
+          var directoryEntries = Array.isArray(data) ? data : [];
+          var artifacts = typeof ARTIFACTS !== 'undefined' && Array.isArray(ARTIFACTS) ? ARTIFACTS : [];
+          var outputs = source && typeof source.mergeLessonOutputs === 'function'
+            ? source.mergeLessonOutputs(lessonPath, directoryEntries, artifacts)
+            : directoryEntries;
+          if (outputs.length === 0) {
             renderPanelFallback(outputsEl, 'No separate output artifacts were found for this lesson.', REPO_TREE + lessonPath, 'View lesson source');
             return;
           }
-          renderOutputFiles(outputsEl, data);
+          renderOutputFiles(outputsEl, outputs);
         });
       }
 

@@ -936,9 +936,45 @@ function parseFrontmatter(text) {
   return result;
 }
 
-function discoverArtifacts() {
+function listSkillBundleFiles(bundleDir, repoRoot) {
+  const rootStat = fs.lstatSync(bundleDir);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new Error(`Skill bundle must be a regular directory: ${bundleDir}`);
+  }
+  const resolvedRepoRoot = fs.realpathSync(repoRoot);
+  const resolvedBundle = fs.realpathSync(bundleDir);
+  const rootPrefix = resolvedRepoRoot.endsWith(path.sep)
+    ? resolvedRepoRoot
+    : resolvedRepoRoot + path.sep;
+  if (resolvedBundle !== resolvedRepoRoot && !resolvedBundle.startsWith(rootPrefix)) {
+    throw new Error(`Skill bundle escapes the repository: ${bundleDir}`);
+  }
+  const files = [];
+  function visit(currentDir, relativeDir) {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true })
+      .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Skill bundle contains a symlink: ${fullPath}`);
+      }
+      if (entry.isDirectory()) {
+        visit(fullPath, relativePath);
+      } else if (entry.isFile()) {
+        files.push(relativePath);
+      } else {
+        throw new Error(`Skill bundle contains a non-regular file: ${fullPath}`);
+      }
+    }
+  }
+  visit(bundleDir, '');
+  return files.sort();
+}
+
+function discoverArtifacts(repoRoot = REPO_ROOT) {
   const artifacts = [];
-  const phasesDir = path.join(REPO_ROOT, 'phases');
+  const phasesDir = path.join(repoRoot, 'phases');
   if (!fs.existsSync(phasesDir)) return artifacts;
   const VALID_TYPES = ['skill', 'prompt', 'agent'];
   for (const phaseDirName of fs.readdirSync(phasesDir).sort()) {
@@ -953,8 +989,11 @@ function discoverArtifacts() {
       const lessonRel = `phases/${phaseDirName}/${lessonDirName}`;
       const outputsDir = path.join(phaseDir, lessonDirName, 'outputs');
       if (fs.existsSync(outputsDir)) {
-        for (const file of fs.readdirSync(outputsDir).sort()) {
-          if (!file.endsWith('.md')) continue;
+        const entries = fs.readdirSync(outputsDir, { withFileTypes: true })
+          .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+        for (const entry of entries) {
+          if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+          const file = entry.name;
           const stem = file.replace(/\.md$/, '');
           const type = VALID_TYPES.find(t => stem.startsWith(`${t}-`));
           if (!type) continue;
@@ -971,6 +1010,35 @@ function discoverArtifacts() {
             lesson: lessonId,
             lessonPath: lessonRel,
             file: `${lessonRel}/outputs/${file}`,
+          });
+        }
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          const bundleDir = path.join(outputsDir, entry.name);
+          const skillPath = path.join(bundleDir, 'SKILL.md');
+          if (!fs.existsSync(skillPath)) continue;
+          const files = listSkillBundleFiles(bundleDir, repoRoot);
+          if (!files.includes('SKILL.md')) continue;
+          let meta = {};
+          try {
+            meta = parseFrontmatter(fs.readFileSync(skillPath, 'utf8')) || {};
+          } catch (_) {}
+          artifacts.push({
+            kind: 'skill',
+            name: (meta.name || entry.name).trim(),
+            description: (meta.description || '').trim(),
+            tags: Array.isArray(meta.tags) ? meta.tags : [],
+            version: (meta.version || '').trim(),
+            ...(meta.license && { license: String(meta.license).trim() }),
+            ...(meta.compatibility && { compatibility: String(meta.compatibility).trim() }),
+            ...(meta['allowed-tools'] && { allowedTools: String(meta['allowed-tools']).trim() }),
+            phase: phaseId,
+            lesson: lessonId,
+            lessonPath: lessonRel,
+            file: `${lessonRel}/outputs/${entry.name}/SKILL.md`,
+            bundle: true,
+            bundlePath: `${lessonRel}/outputs/${entry.name}`,
+            files,
           });
         }
       }
@@ -1268,4 +1336,11 @@ function syncCounts(lessons, phaseCount, outputs) {
   }
 }
 
-build();
+if (require.main === module) {
+  build();
+}
+
+module.exports = {
+  discoverArtifacts,
+  parseFrontmatter,
+};

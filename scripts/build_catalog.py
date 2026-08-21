@@ -34,7 +34,8 @@ Output shape (schema_version 1):
               "has_notebook": false,
               "code_files": ["main.py", ...],
               "outputs": [
-                {"type": "skill", "name": "...", "path": "...", "version": "1.0.0", "description": "...", "tags": [...]}
+                {"type": "skill", "name": "...", "path": "...", "version": "1.0.0", "description": "...", "tags": [...]},
+                {"type": "skill", "name": "bundle", "path": ".../SKILL.md", "bundle": true, "bundle_path": "...", "files": [...]}
               ]
             }
           ]
@@ -153,14 +154,75 @@ def parse_artifact(path: Path) -> dict[str, object] | None:
     }
 
 
+def list_bundle_files(bundle_root: Path) -> list[str]:
+    if bundle_root.is_symlink() or not bundle_root.is_dir():
+        raise ValueError(f"skill bundle must be a regular directory: {bundle_root}")
+    resolved_bundle = bundle_root.resolve(strict=True)
+    resolved_root = ROOT.resolve(strict=True)
+    if not resolved_bundle.is_relative_to(resolved_root):
+        raise ValueError(f"skill bundle escapes the repository: {bundle_root}")
+    files: list[str] = []
+    for entry in sorted(bundle_root.rglob("*")):
+        if entry.is_symlink():
+            raise ValueError(f"skill bundle contains a symlink: {entry}")
+        if entry.is_dir():
+            continue
+        if not entry.is_file():
+            raise ValueError(f"skill bundle contains a non-regular file: {entry}")
+        files.append(entry.relative_to(bundle_root).as_posix())
+    return files
+
+
+def parse_skill_bundle(bundle_root: Path) -> dict[str, object] | None:
+    skill_path = bundle_root / "SKILL.md"
+    if not skill_path.is_file():
+        return None
+    files = list_bundle_files(bundle_root)
+    try:
+        text = skill_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None
+    meta = parse_frontmatter(text)
+    tags = meta.get("tags", [])
+    if not isinstance(tags, list):
+        tags = []
+    record: dict[str, object] = {
+        "type": "skill",
+        "name": str(meta.get("name", "")).strip() or bundle_root.name,
+        "path": skill_path.relative_to(ROOT).as_posix(),
+        "version": str(meta.get("version", "")).strip(),
+        "description": str(meta.get("description", "")).strip(),
+        "tags": list(tags),
+        "bundle": True,
+        "bundle_path": bundle_root.relative_to(ROOT).as_posix(),
+        "files": files,
+    }
+    for source_key, target_key in (
+        ("license", "license"),
+        ("compatibility", "compatibility"),
+        ("allowed-tools", "allowed_tools"),
+    ):
+        value = str(meta.get(source_key, "")).strip()
+        if value:
+            record[target_key] = value
+    return record
+
+
 def list_outputs(outputs_dir: Path) -> list[dict[str, object]]:
     if not outputs_dir.is_dir():
         return []
     artifacts: list[dict[str, object]] = []
-    for path in sorted(outputs_dir.iterdir()):
+    paths = sorted(outputs_dir.iterdir())
+    for path in paths:
         if path.suffix != ".md" or not path.is_file():
             continue
         record = parse_artifact(path)
+        if record is not None:
+            artifacts.append(record)
+    for path in paths:
+        if not path.is_dir():
+            continue
+        record = parse_skill_bundle(path)
         if record is not None:
             artifacts.append(record)
     return artifacts

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Install course outputs (skills / prompts / agents) into a target directory.
 
-Walks every `phases/**/outputs/{skill,prompt,agent}-*.md` artifact across the
-curriculum, parses YAML frontmatter, filters by type / phase / tag, and copies
-the matching files into a target directory using one of three layouts.
+Walks flat `phases/**/outputs/{skill,prompt,agent}-*.md` artifacts and skill
+bundles at `phases/**/outputs/<name>/SKILL.md`, parses YAML frontmatter, filters
+by type / phase / tag, and installs each matching artifact.
 
 Usage:
     python3 scripts/install_skills.py <target_dir> [options]
@@ -13,23 +13,25 @@ Options:
     --phase N                          filter to a single phase number
     --tag TAG                          filter to outputs whose tags include TAG
     --layout {flat,by-phase,skills}    default: skills
-        flat       <target>/<name>.md
-        by-phase   <target>/phase-NN/<name>.md
-        skills     <target>/<name>/SKILL.md
+        flat       flat files: <target>/<name>.md; bundles: <target>/<name>/
+        by-phase   flat files: <target>/phase-NN/<name>.md; bundles: .../<name>/
+        skills     flat files: <target>/<name>/SKILL.md; bundles: <target>/<name>/
     --dry-run                          preview without writing
     --force                            overwrite existing files
     --json                             write manifest.json only; do not print steps
 
-Always writes <target>/manifest.json with the full inventory (name, type, phase,
-lesson, source path, target path, tags, version).
+Always writes <target>/manifest.json with the installed inventory. Bundle
+entries also include their source directory and regular-file list.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -54,6 +56,7 @@ class Artifact:
     description: str
     tags: list[str]
     source: Path
+    bundle_root: Path | None = None
 
     def to_dict(self, target: Path | None = None) -> dict:
         out: dict[str, object] = {
@@ -66,6 +69,10 @@ class Artifact:
             "tags": self.tags,
             "source": self.source.relative_to(ROOT).as_posix(),
         }
+        if self.bundle_root is not None:
+            out["bundle"] = True
+            out["bundle_path"] = self.bundle_root.relative_to(ROOT).as_posix()
+            out["files"] = validate_bundle(self.bundle_root)
         if target is not None:
             out["target"] = target.as_posix()
         return out
@@ -73,6 +80,18 @@ class Artifact:
 
 def derive_phase_lesson(path: Path) -> tuple[int | None, int | None]:
     parts = path.parts
+    try:
+        phases_index = parts.index("phases")
+    except ValueError:
+        phases_index = -1
+    if phases_index >= 0:
+        numbers: list[int | None] = []
+        for part in parts[phases_index + 1 : phases_index + 3]:
+            head = part.split("-", 1)[0]
+            numbers.append(int(head) if head.isdigit() else None)
+        while len(numbers) < 2:
+            numbers.append(None)
+        return numbers[0], numbers[1]
     phase_num: int | None = None
     lesson_num: int | None = None
     for part in parts:
@@ -88,52 +107,76 @@ def derive_phase_lesson(path: Path) -> tuple[int | None, int | None]:
     return phase_num, lesson_num
 
 
+def artifact_from_markdown(
+    path: Path,
+    artifact_type: str,
+    fallback_name: str,
+    bundle_root: Path | None = None,
+) -> Artifact | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None
+    meta = parse_frontmatter(text) or {}
+    default_phase, default_lesson = derive_phase_lesson(path)
+    phase_raw = meta.get("phase", default_phase)
+    lesson_raw = meta.get("lesson", default_lesson)
+    try:
+        phase = int(phase_raw) if phase_raw is not None else None
+    except (TypeError, ValueError):
+        phase = default_phase
+    try:
+        lesson = int(lesson_raw) if lesson_raw is not None else None
+    except (TypeError, ValueError):
+        lesson = default_lesson
+    tags_raw = meta.get("tags", [])
+    return Artifact(
+        type=artifact_type,
+        name=str(meta.get("name", "")).strip() or fallback_name,
+        phase=phase,
+        lesson=lesson,
+        version=str(meta.get("version", "")).strip(),
+        description=str(meta.get("description", "")).strip(),
+        tags=list(tags_raw) if isinstance(tags_raw, list) else [],
+        source=path,
+        bundle_root=bundle_root,
+    )
+
+
 def discover_artifacts() -> Iterable[Artifact]:
     if not PHASES_DIR.is_dir():
         return
-    for output_dir in sorted(PHASES_DIR.glob("*/[0-9][0-9]-*/outputs")):
-        for path in sorted(output_dir.iterdir()):
+    output_dirs = sorted(PHASES_DIR.glob("*/[0-9][0-9]-*/outputs"))
+    for output_dir in output_dirs:
+        paths = sorted(output_dir.iterdir())
+        for path in paths:
             if path.suffix != ".md" or not path.is_file():
                 continue
             stem = path.stem
-            artifact_type: str | None = None
-            for t in VALID_TYPES:
-                if stem.startswith(f"{t}-"):
-                    artifact_type = t
-                    break
+            artifact_type = next(
+                (t for t in VALID_TYPES if stem.startswith(f"{t}-")), None
+            )
             if artifact_type is None:
                 continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
+            artifact = artifact_from_markdown(path, artifact_type, stem)
+            if artifact is not None:
+                yield artifact
+    for output_dir in output_dirs:
+        paths = sorted(output_dir.iterdir())
+        for bundle_root in paths:
+            skill_path = bundle_root / "SKILL.md"
+            if bundle_root.is_symlink():
+                raise UnsafeBundleError(
+                    f"skill bundle must be a regular directory: {bundle_root}"
+                )
+            if not bundle_root.is_dir() or not skill_path.exists():
                 continue
-            meta = parse_frontmatter(text) or {}
-            default_phase, default_lesson = derive_phase_lesson(path)
-            phase_raw = meta.get("phase", default_phase)
-            lesson_raw = meta.get("lesson", default_lesson)
-            try:
-                phase = int(phase_raw) if phase_raw is not None else None
-            except (TypeError, ValueError):
-                phase = default_phase
-            try:
-                lesson = int(lesson_raw) if lesson_raw is not None else None
-            except (TypeError, ValueError):
-                lesson = default_lesson
-            name = str(meta.get("name", "")).strip() or stem
-            description = str(meta.get("description", "")).strip()
-            version = str(meta.get("version", "")).strip()
-            tags_raw = meta.get("tags", [])
-            tags = list(tags_raw) if isinstance(tags_raw, list) else []
-            yield Artifact(
-                type=artifact_type,
-                name=name,
-                phase=phase,
-                lesson=lesson,
-                version=version,
-                description=description,
-                tags=tags,
-                source=path,
+            validate_bundle(bundle_root)
+            artifact = artifact_from_markdown(
+                skill_path, "skill", bundle_root.name, bundle_root
             )
+            if artifact is not None:
+                yield artifact
 
 
 def filter_artifacts(
@@ -155,6 +198,24 @@ def filter_artifacts(
 
 
 def target_path(artifact: Artifact, target_root: Path, layout: str) -> Path:
+    if (
+        not artifact.name
+        or artifact.name in {".", ".."}
+        or "/" in artifact.name
+        or "\\" in artifact.name
+        or Path(artifact.name).name != artifact.name
+    ):
+        raise ValueError(f"unsafe artifact name: {artifact.name!r}")
+    if artifact.bundle_root is not None:
+        if layout == "by-phase":
+            phase_dir = (
+                f"phase-{artifact.phase:02d}"
+                if artifact.phase is not None
+                else "phase-unknown"
+            )
+            return target_root / phase_dir / artifact.name
+        if layout in {"flat", "skills"}:
+            return target_root / artifact.name
     if layout == "flat":
         return target_root / f"{artifact.name}.md"
     if layout == "by-phase":
@@ -171,6 +232,17 @@ class Plan:
     collisions: list[Path] = field(default_factory=list)
 
 
+def target_identity(artifact: Artifact, target_root: Path, layout: str) -> Path:
+    if layout == "by-phase":
+        phase_dir = (
+            f"phase-{artifact.phase:02d}"
+            if artifact.phase is not None
+            else "phase-unknown"
+        )
+        return target_root / phase_dir / artifact.name
+    return target_root / artifact.name
+
+
 def build_plan(
     artifacts: list[Artifact], target_root: Path, layout: str, force: bool
 ) -> Plan:
@@ -178,23 +250,107 @@ def build_plan(
     seen_targets: dict[Path, Artifact] = {}
     for a in artifacts:
         dest = target_path(a, target_root, layout)
-        if dest in seen_targets:
+        identity = target_identity(a, target_root, layout)
+        if identity in seen_targets:
             sys.stderr.write(
-                f"warn: target collision between {seen_targets[dest].source} "
-                f"and {a.source} (both map to {dest}); skipping latter\n"
+                f"warn: target collision between {seen_targets[identity].source} "
+                f"and {a.source} (both map to {identity}); skipping latter\n"
             )
             continue
-        seen_targets[dest] = a
+        seen_targets[identity] = a
         if dest.exists() and not force:
             plan.collisions.append(dest)
         plan.actions.append((a, dest))
     return plan
 
 
-def apply_plan(plan: Plan) -> None:
+class UnsafeBundleError(ValueError):
+    pass
+
+
+def validate_bundle(bundle_root: Path) -> list[str]:
+    if bundle_root.is_symlink() or not bundle_root.is_dir():
+        raise UnsafeBundleError(f"skill bundle must be a regular directory: {bundle_root}")
+    try:
+        resolved_bundle = bundle_root.resolve(strict=True)
+        resolved_root = ROOT.resolve(strict=True)
+    except OSError as exc:
+        raise UnsafeBundleError(f"could not resolve skill bundle: {bundle_root}") from exc
+    if not resolved_bundle.is_relative_to(resolved_root):
+        raise UnsafeBundleError(f"skill bundle escapes the repository: {bundle_root}")
+    skill_path = bundle_root / "SKILL.md"
+    if skill_path.is_symlink() or not skill_path.is_file():
+        raise UnsafeBundleError(
+            f"skill bundle entrypoint must be a regular file: {skill_path}"
+        )
+    bundle_files: list[str] = []
+    for current, dirs, files in os.walk(bundle_root, followlinks=False):
+        dirs.sort()
+        files.sort()
+        current_path = Path(current)
+        for name in dirs:
+            entry = current_path / name
+            if entry.is_symlink() or not entry.is_dir():
+                raise UnsafeBundleError(
+                    f"skill bundle contains an unsafe directory entry: {entry}"
+                )
+        for name in files:
+            entry = current_path / name
+            if entry.is_symlink() or not entry.is_file():
+                raise UnsafeBundleError(
+                    f"skill bundle contains an unsafe file entry: {entry}"
+                )
+            bundle_files.append(entry.relative_to(bundle_root).as_posix())
+    return sorted(bundle_files)
+
+
+def install_bundle(bundle_root: Path, dest: Path, force: bool) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(
+        tempfile.mkdtemp(prefix=f".{dest.name}.install-", dir=dest.parent)
+    )
+    staged_bundle = staging_root / "bundle"
+    backup_root: Path | None = None
+    backup: Path | None = None
+    try:
+        shutil.copytree(bundle_root, staged_bundle, copy_function=shutil.copy2)
+        if dest.exists() or dest.is_symlink():
+            if not force:
+                raise FileExistsError(f"target already exists: {dest}")
+            backup_root = Path(
+                tempfile.mkdtemp(prefix=f".{dest.name}.backup-", dir=dest.parent)
+            )
+            backup = backup_root / "previous"
+            os.replace(dest, backup)
+        try:
+            os.replace(staged_bundle, dest)
+        except Exception:
+            backup_exists = backup is not None and (
+                backup.exists() or backup.is_symlink()
+            )
+            dest_exists = dest.exists() or dest.is_symlink()
+            if backup_exists and not dest_exists:
+                os.replace(backup, dest)
+            raise
+        if backup_root is not None:
+            shutil.rmtree(backup_root)
+            backup_root = None
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        if backup_root is not None:
+            shutil.rmtree(backup_root, ignore_errors=True)
+
+
+def apply_plan(plan: Plan, force: bool = False) -> None:
+    for artifact, _dest in plan.actions:
+        if artifact.bundle_root is not None:
+            validate_bundle(artifact.bundle_root)
     for artifact, dest in plan.actions:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(artifact.source, dest)
+        if artifact.bundle_root is not None:
+            install_bundle(artifact.bundle_root, dest, force)
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(artifact.source, dest)
 
 
 def write_manifest(target_root: Path, artifacts: list[Artifact], layout: str) -> Path:
@@ -242,13 +398,21 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    artifacts = list(discover_artifacts())
+    try:
+        artifacts = list(discover_artifacts())
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 1
     selected = filter_artifacts(artifacts, args.type, args.phase, args.tag)
     if not selected:
         sys.stderr.write("no artifacts matched the given filters\n")
         return 1
 
-    plan = build_plan(selected, args.target_dir, args.layout, args.force)
+    try:
+        plan = build_plan(selected, args.target_dir, args.layout, args.force)
+    except ValueError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 1
     if plan.collisions and not args.force:
         sys.stderr.write(
             f"error: {len(plan.collisions)} target file(s) already exist. "
@@ -276,8 +440,15 @@ def main(argv: list[str]) -> int:
                 sys.stdout.write(f"  ... and {len(plan.actions) - 20} more\n")
         return 0
 
-    apply_plan(plan)
-    manifest_path = write_manifest(args.target_dir, selected, args.layout)
+    try:
+        apply_plan(plan, force=args.force)
+        installed_artifacts = [artifact for artifact, _dest in plan.actions]
+        manifest_path = write_manifest(
+            args.target_dir, installed_artifacts, args.layout
+        )
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 1
     if not args.json:
         sys.stdout.write(
             f"installed {len(plan.actions)} artifact(s) into {args.target_dir} "

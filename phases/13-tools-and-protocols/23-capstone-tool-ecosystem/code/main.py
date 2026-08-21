@@ -1,14 +1,14 @@
-"""Phase 13 Capstone - end-to-end research-and-report ecosystem.
+"""Phase 13 Capstone - in-process research-and-report simulation.
 
-All the pieces from Phase 13 in one runnable demo:
-  - gateway with OAuth-shaped auth and RBAC
-  - MCP server exposing arxiv_search tool, recent resource, task-augmented
-    generate_report, and a ui:// app
-  - A2A call to a writer agent for paper summarization
-  - OTel GenAI spans emitted across every hop with one trace id
+Several Phase 13 boundaries in one readable demo:
+  - gateway-shaped static token lookup and RBAC
+  - local tool functions returning task- and ui-shaped data
+  - A2A-shaped writer delegation represented by a nested span
+  - in-memory trace dictionaries sharing one trace id
   - pinned-hash manifest guarding description mutations
 
-Stdlib only.
+This file does not implement an MCP or A2A transport, OAuth exchange, MCP App
+bridge, telemetry exporter, or execution sandbox. Stdlib only.
 
 Run: python code/main.py
 """
@@ -21,10 +21,6 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-
-# ------------------------------------------------------------------
-# OTel GenAI span emitter (condensed from Lesson 20)
-# ------------------------------------------------------------------
 
 SPANS: list[dict] = []
 
@@ -43,12 +39,8 @@ def span(name: str, kind: str, trace_id: str | None, parent: str | None,
 
 
 def finish(sp: dict) -> None:
-    sp["end"] = time.time_ns()
+    sp["end"] = max(time.time_ns(), sp["start"] + 1)
 
-
-# ------------------------------------------------------------------
-# research MCP server
-# ------------------------------------------------------------------
 
 TOOLS = [
     {"name": "arxiv_search", "description": "Use when the user searches arXiv by keyword."},
@@ -72,21 +64,18 @@ def research_arxiv_search(args: dict) -> dict:
 
 
 def research_generate_report(args: dict, trace_id: str, parent: str) -> dict:
-    # task-augmented. Internally calls a2a writer and returns ui:// resource
     task_id = f"tsk_{uuid.uuid4().hex[:10]}"
     sp = span("mcp.task.working", "INTERNAL", trace_id, parent,
               {"gen_ai.operation.name": "execute_tool", "mcp.task.id": task_id})
-    # a2a delegation
-    a2a = span("a2a.tasks.send", "CLIENT", trace_id, sp["spanId"],
+    a2a = span("a2a.SendMessage", "CLIENT", trace_id, sp["spanId"],
                {"a2a.peer": "writer-agent", "a2a.skill": "summarize_papers"})
-    time.sleep(0.02)
     finish(a2a)
     finish(sp)
     html = (
         "<!doctype html><html><body>"
         "<h1>Agent-protocol arXiv report</h1><ul>"
         + "".join(f"<li>{p['arxiv_id']}: {p['title']}</li>" for p in PAPERS)
-        + "</ul><script>/* postMessage host.* here */</script></body></html>"
+        + "</ul><script>/* A real MCP App bridge is intentionally absent. */</script></body></html>"
     )
     return {
         "_meta": {"task": {"id": task_id, "state": "completed", "ttl": 900_000},
@@ -100,10 +89,6 @@ def research_generate_report(args: dict, trace_id: str, parent: str) -> dict:
         "_html": html,
     }
 
-
-# ------------------------------------------------------------------
-# gateway
-# ------------------------------------------------------------------
 
 USERS = {
     "tok_alice": {"id": "alice", "scopes": {"research:read", "research:write"}},
@@ -128,7 +113,6 @@ def gateway_call(token: str, tool_name: str, args: dict,
     if required and required not in u["scopes"]:
         AUDIT.append({"user": u["id"], "tool": tool_name, "decision": "403"})
         return {"error": "insufficient_scope", "scope": required}
-    # find backend tool
     tool = next((t for t in TOOLS if t["name"] == tool_name), None)
     if tool is None:
         return {"error": "unknown tool"}
@@ -145,10 +129,6 @@ def gateway_call(token: str, tool_name: str, args: dict,
     AUDIT.append({"user": u["id"], "tool": tool_name, "decision": "allow"})
     return result
 
-
-# ------------------------------------------------------------------
-# orchestrator (the top-level agent)
-# ------------------------------------------------------------------
 
 def orchestrator(token: str, user_query: str) -> dict:
     trace_id = _hex(16)
@@ -204,16 +184,15 @@ def demo() -> None:
 
     print("\n--- primitive coverage ---")
     covered = [
-        "tool interface (L01)", "function calling (L02)", "parallel (L03)",
-        "structured output (L04)", "tool schema design (L05)",
-        "MCP fundamentals (L06)", "server (L07)", "client (L08)",
-        "transports (L09 via gateway)", "resources and prompts (L10)",
-        "sampling (L11 pattern via a2a)", "roots and elicitation (L12 pattern)",
-        "async tasks (L13)", "ui:// apps (L14)",
-        "security poisoning (L15 via pinned hashes)",
-        "OAuth 2.1 (L16 via gateway scopes)", "gateway (L17)",
-        "A2A (L18)", "OTel GenAI (L19)", "routing (L20 pattern)",
-        "AGENTS.md + SKILL.md (L21 packaging)",
+        "tool interface and direct function dispatch",
+        "structured content dictionaries",
+        "task-shaped identifier and completed result",
+        "ui://-shaped resource reference",
+        "description mutation detection with pinned hashes",
+        "static-token scope and gateway policy simulation",
+        "A2A-shaped opaque delegation boundary",
+        "in-memory trace identifiers and parent span identifiers",
+        "orchestrator routing between local operations",
     ]
     for c in covered:
         print(f"  + {c}")

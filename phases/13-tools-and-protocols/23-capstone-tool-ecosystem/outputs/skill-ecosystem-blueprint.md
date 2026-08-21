@@ -1,9 +1,9 @@
 ---
 name: ecosystem-blueprint
 description: Produce a full Phase 13 ecosystem architecture given a product need; name primitives, security posture, telemetry, and packaging.
-version: 1.0.0
-phase: 13
-lesson: 22
+version: "1.0.0"
+phase: "13"
+lesson: "23"
 tags: [mcp, capstone, ecosystem, architecture, a2a, otel]
 ---
 
@@ -25,7 +25,7 @@ Hard rejects:
 
 Refusal rules:
 - If the product need is better served by a direct LLM call, refuse to scaffold the full ecosystem.
-- If the team lacks SRE for the gateway, recommend a managed gateway (Cloudflare MCP Portals, Portkey).
-- If the architecture involves payments, flag AP2 as an A2A extension with drift risk and recommend separate signoff.
+- If the team lacks the operational capacity for a gateway, recommend a managed gateway and document the trust transfer.
+- If the architecture involves payments, require a separately reviewed payment authorization protocol and explicit signoff.
 
 Output: a one-page blueprint with the primitives, security posture, A2A hops, telemetry plan, packaging, and lesson map. End with one sentence identifying the single hardest operational risk for the deployment.

@@ -69,7 +69,7 @@
   <text x="576" y="342" class="small">durable; crash safe</text>
   <text x="576" y="374" class="step">A2A call out:</text>
   <text x="576" y="392" class="small">writer-agent</text>
-  <text x="576" y="408" class="small">tasks/send summary</text>
+  <text x="576" y="408" class="small">SendMessage summary</text>
 
   <path d="M780,390 L860,390" class="edge" marker-end="url(#arrow)"/>
 

@@ -1911,7 +1911,7 @@
   <script src="content-source.js?v=20260821a"></script>
   <script src="progress.js?v=20260801a"></script>
   <script src="header.js?v=20260808h" defer></script>
-  <script src="cmdpalette.js?v=20260808h" defer></script>
+  <script src="cmdpalette.js?v=20260821a" defer></script>
   <script src="figures.js?v=20260801a"></script>
   <script src="lesson-figures.js?v=20260801a"></script>
   <script src="figures-math.js?v=20260801a"></script>
@@ -1947,21 +1947,21 @@
   <script src="figures-cv3.js?v=20260801a"></script>
   <script src="figures-speech2.js?v=20260801a"></script>
   <script src="figures-multimodal2.js?v=20260801a"></script>
-  <script src="figures-tools2.js?v=20260801a"></script>
+  <script src="figures-tools2.js?v=20260821a"></script>
   <script src="figures-agents4.js?v=20260801a"></script>
   <script src="figures-swarms3.js?v=20260801a"></script>
   <script src="figures-genai3.js?v=20260801a"></script>
   <script src="figures-misc2.js?v=20260801a"></script>
   <script src="figures-history.js?v=20260801a"></script>
   <script src="figures-capstone-e.js?v=20260801a"></script>
-  <script src="figures-capstone-f.js?v=20260801a"></script>
+  <script src="figures-capstone-f.js?v=20260821a"></script>
   <script src="figures-capstone-g.js?v=20260801a"></script>
   <script src="figures-capstone-h.js?v=20260801a"></script>
   <script src="figures-capstone-i.js?v=20260801a"></script>
   <script src="figures-alignment3.js?v=20260801a"></script>
   <script src="figures-alignment4.js?v=20260801a"></script>
   <script src="figures-workbench.js?v=20260801a"></script>
-  <script src="figures-tools3.js?v=20260801a"></script>
+  <script src="figures-tools3.js?v=20260821a"></script>
   <script src="figures-setup.js?v=20260801a"></script>
   <script src="figures-foundations3.js?v=20260801a"></script>
   <script src="figures-visaudio4.js?v=20260801a"></script>
@@ -2032,6 +2032,7 @@
       var lessonPath = params.get('path');
       var requestedTrackId = params.get('track') || '';
       var originatingTrackId = params.get('fromTrack') || '';
+      var requestedLearningPathId = params.get('learningPath') || '';
 
       function preferredScrollBehavior() {
         return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
@@ -2061,6 +2062,8 @@
       var certificationLesson = null;
       var certificationMode = false;
       var certificationSupplementalMode = false;
+      var learningPath = null;
+      var learningPathMode = false;
       var PROGRESS_STORAGE_KEY = 'aifs:progress:v1';
 
       function certificationData() {
@@ -2103,6 +2106,73 @@
           }
         }
         return null;
+      }
+
+      function learningPathEntryPath(entry) {
+        return typeof entry === 'string' ? entry : entry && entry.path ? entry.path : '';
+      }
+
+      function findLearningPath(id) {
+        if (!id || typeof LEARNING_PATHS === 'undefined' || !Array.isArray(LEARNING_PATHS)) return null;
+        return LEARNING_PATHS.find(function (path) { return path && path.id === id; }) || null;
+      }
+
+      function learningPathEntries(path, includeOptional) {
+        if (!path) return [];
+        var required = Array.isArray(path.lessons) ? path.lessons : [];
+        var optional = includeOptional && Array.isArray(path.optionalLessons) ? path.optionalLessons : [];
+        return required.concat(optional);
+      }
+
+      function learningPathContains(path, target) {
+        return learningPathEntries(path, true).some(function (entry) {
+          return learningPathEntryPath(entry) === target;
+        });
+      }
+
+      function learningPathLessonHref(path) {
+        return 'lesson.html?path=' + encodeURIComponent(path) +
+          '&learningPath=' + encodeURIComponent(learningPath.id);
+      }
+
+      function learningPathPrerequisiteLabel(path) {
+        var core = phaseLessonForPath(path);
+        if (!core) return path;
+        return 'Phase ' + String(core.phase.id).padStart(2, '0') + ' · ' + core.lesson.name;
+      }
+
+      function unmetLearningPathPrerequisites(entry) {
+        var prerequisites = entry && Array.isArray(entry.prerequisitePaths)
+          ? entry.prerequisitePaths
+          : [];
+        return prerequisites.filter(function (prerequisitePath) {
+          return !(window.AIFSProgress && window.AIFSProgress.isLessonComplete(prerequisitePath));
+        });
+      }
+
+      function learningPathPrerequisiteCallout(entry, heading) {
+        var unmet = unmetLearningPathPrerequisites(entry);
+        if (!unmet.length) return '';
+        var html = '<div class="continue-callout prerequisite-callout"><strong>' + escapeHtml(heading || 'Prerequisite check') + '</strong><br>';
+        for (var index = 0; index < unmet.length; index++) {
+          var prerequisitePath = unmet[index];
+          var label = learningPathPrerequisiteLabel(prerequisitePath);
+          if (prerequisitePath === lessonPath) {
+            html += '<span>Complete this lesson: ' + escapeHtml(label) + '.</span>';
+          } else {
+            var insideFocusedPath = learningPathContains(learningPath, prerequisitePath);
+            var href = insideFocusedPath
+              ? learningPathLessonHref(prerequisitePath)
+              : 'lesson.html?path=' + encodeURIComponent(prerequisitePath);
+            html += '<a href="' + href + '"' + (insideFocusedPath ? '' : ' target="_blank" rel="noopener"') + '>Detour: ' + escapeHtml(label) + '</a>';
+          }
+          if (index < unmet.length - 1) html += '<br>';
+        }
+        if (unmet.some(function (prerequisitePath) { return !learningPathContains(learningPath, prerequisitePath); })) {
+          html += '<br><span>The external prerequisite opens in a new tab so this focused route stays in place.</span>';
+        }
+        html += '</div>';
+        return html;
       }
 
       function lessonProgressClass(path, readable) {
@@ -2202,6 +2272,10 @@
         }
         certificationMode = !!(certificationTrack && certificationTrackContains(certificationTrack, lessonPath));
         certificationSupplementalMode = !!(certificationOriginTrack && !certificationMode);
+        learningPath = !certificationMode && !certificationSupplementalMode
+          ? findLearningPath(requestedLearningPathId)
+          : null;
+        learningPathMode = !!(learningPath && learningPathContains(learningPath, lessonPath));
 
         syncCertificationQuizProgressVersion();
 
@@ -2234,6 +2308,40 @@
               required: certRef.required !== false,
             });
             if (certPath === lessonPath) currentLessonIndex = flatLessons.length - 1;
+          }
+        } else if (learningPathMode) {
+          var requiredCount = Array.isArray(learningPath.lessons) ? learningPath.lessons.length : 0;
+          var pathEntries = learningPathEntries(learningPath, true);
+          for (var lp = 0; lp < pathEntries.length; lp++) {
+            var pathEntry = pathEntries[lp];
+            var pathValue = learningPathEntryPath(pathEntry);
+            var coreLesson = phaseLessonForPath(pathValue);
+            if (!coreLesson) continue;
+            var corePhaseSlug = extractPhaseSlug(coreLesson.phase, coreLesson.phaseIndex);
+            var coreLessonSlug = extractLessonSlug(coreLesson.lesson, coreLesson.lessonIndex);
+            flatLessons.push({
+              phaseIndex: coreLesson.phaseIndex,
+              lessonIndex: coreLesson.lessonIndex,
+              phaseName: coreLesson.phase.name,
+              phaseId: coreLesson.phase.id,
+              phaseSlug: corePhaseSlug,
+              lessonName: coreLesson.lesson.name,
+              lessonSlug: coreLessonSlug,
+              status: coreLesson.lesson.status,
+              type: coreLesson.lesson.type,
+              lang: coreLesson.lesson.lang,
+              url: coreLesson.lesson.url,
+              path: pathValue,
+              isReadable: true,
+              required: lp < requiredCount && (!pathEntry || typeof pathEntry === 'string' || pathEntry.required !== false),
+              prerequisitePaths: pathEntry && typeof pathEntry === 'object' && Array.isArray(pathEntry.prerequisitePaths)
+                ? pathEntry.prerequisitePaths.slice()
+                : []
+            });
+            if (pathValue === lessonPath) {
+              currentPhaseIndex = coreLesson.phaseIndex;
+              currentLessonIndex = flatLessons.length - 1;
+            }
           }
         } else if (typeof PHASES !== 'undefined') {
           for (var i = 0; i < PHASES.length; i++) {
@@ -2315,6 +2423,32 @@
             certHtml += escapeHtml(certLesson.lessonName) + '</a>';
           }
           sidebar.innerHTML = certHtml;
+          return;
+        }
+
+        if (learningPathMode) {
+          var pathHtml = '<div class="sidebar-phase-nav"><a href="catalog.html?q=' + encodeURIComponent(learningPath.title || learningPath.id) + '">&larr; Full course catalog</a></div>';
+          var requiredPathLessons = flatLessons.filter(function (item) { return item.required !== false; });
+          var optionalPathLessons = flatLessons.filter(function (item) { return item.required === false; });
+          pathHtml += '<div class="sidebar-phase-header">' + escapeHtml(learningPath.title || learningPath.id) + ' · ' + requiredPathLessons.length + ' lessons</div>';
+          for (var lpi = 0; lpi < requiredPathLessons.length; lpi++) {
+            var pathLesson = requiredPathLessons[lpi];
+            var pathActive = pathLesson.path === lessonPath;
+            pathHtml += '<a class="sidebar-lesson-link' + (pathActive ? ' active' : '') + '" href="' + learningPathLessonHref(pathLesson.path) + '">';
+            pathHtml += '<span class="sidebar-lesson-dot ' + lessonProgressClass(pathLesson.path, true) + '"></span>';
+            pathHtml += escapeHtml(pathLesson.lessonName) + '</a>';
+          }
+          if (optionalPathLessons.length) {
+            pathHtml += '<div class="sidebar-phase-header">Optional capstone</div>';
+            for (var lpo = 0; lpo < optionalPathLessons.length; lpo++) {
+              var optionalLesson = optionalPathLessons[lpo];
+              var optionalActive = optionalLesson.path === lessonPath;
+              pathHtml += '<a class="sidebar-lesson-link' + (optionalActive ? ' active' : '') + '" href="' + learningPathLessonHref(optionalLesson.path) + '">';
+              pathHtml += '<span class="sidebar-lesson-dot ' + lessonProgressClass(optionalLesson.path, true) + '"></span>';
+              pathHtml += escapeHtml(optionalLesson.lessonName) + '</a>';
+            }
+          }
+          sidebar.innerHTML = pathHtml;
           return;
         }
 
@@ -2417,6 +2551,7 @@
       }
 
       var lessonQuizPromise = null;
+      var lessonQuizCorrectAnswers = Object.create(null);
 
       // language state (current lang + RTL direction) is owned by lang-picker.js
       function currentLang() {
@@ -2579,11 +2714,13 @@
           url += '&track=' + encodeURIComponent(certificationTrack.id);
         } else if (requestedTrackId && certificationOriginTrack) {
           url += '&track=' + encodeURIComponent(certificationOriginTrack.id);
+        } else if (learningPathMode) {
+          url += '&learningPath=' + encodeURIComponent(learningPath.id);
         }
         var desc = lessonDescription(md);
         var courseName = certificationLesson
           ? (contextTrack && (contextTrack.credential || contextTrack.title || contextTrack.shortName) || 'Certification preparation')
-          : 'AI Engineering from Scratch';
+          : learningPathMode ? (learningPath.title || 'Focused learning path') : 'AI Engineering from Scratch';
         var fullTitle = title + ' · ' + courseName;
         var set = function (sel, val) { var m = document.querySelector(sel); if (m) m.setAttribute('content', val); };
 
@@ -3518,6 +3655,7 @@
       function renderQuiz(data) {
         var questions = data.questions || data;
         if (!questions || !questions.length) return;
+        lessonQuizCorrectAnswers = Object.create(null);
 
         var article = document.querySelector('.lesson-article');
         if (!article) return;
@@ -3583,7 +3721,8 @@
           var questionLabelId = qid + '-label';
           var explanationId = qid + '-exp';
           var hasExplanation = !!q.explanation || !!certificationLesson;
-          html += '<div class="quiz-question" data-correct="' + q.correct + '" id="' + qid + '">';
+          lessonQuizCorrectAnswers[qid] = q.correct;
+          html += '<div class="quiz-question" id="' + qid + '">';
           html += '<div class="quiz-question-text" id="' + questionLabelId + '">' + (qi + 1) + '. ' + escapeHtml(q.question) + '</div>';
           html += '<div class="quiz-options" role="group" aria-labelledby="' + questionLabelId + '">';
           for (var oi = 0; oi < q.options.length; oi++) {
@@ -3611,9 +3750,9 @@
 
       function applyQuizAnswer(questionDiv, chosen, persist) {
         if (!questionDiv || isNaN(chosen)) return;
-        var correct = parseInt(questionDiv.getAttribute('data-correct'));
+        var correct = lessonQuizCorrectAnswers[questionDiv.id];
         var options = questionDiv.querySelectorAll('.quiz-option');
-        if (chosen < 0 || chosen >= options.length || isNaN(correct)) return;
+        if (chosen < 0 || chosen >= options.length || !Number.isInteger(correct)) return;
         questionDiv.classList.add('answered');
 
         for (var i = 0; i < options.length; i++) {
@@ -3761,15 +3900,19 @@
 
         var prev = null;
         for (var pi = currentLessonIndex - 1; pi >= 0; pi--) {
+          if (learningPathMode && flatLessons[pi].required === false) continue;
           if (flatLessons[pi].isReadable) { prev = flatLessons[pi]; break; }
         }
         var next = null;
         for (var ni = currentLessonIndex + 1; ni < flatLessons.length; ni++) {
+          if (learningPathMode && flatLessons[ni].required === false) continue;
           if (flatLessons[ni].isReadable) { next = flatLessons[ni]; break; }
         }
 
         var nav = '<div class="lesson-nav-bottom">';
-        var trackSuffix = certificationMode ? '&track=' + encodeURIComponent(certificationTrack.id) : '';
+        var trackSuffix = certificationMode
+          ? '&track=' + encodeURIComponent(certificationTrack.id)
+          : learningPathMode ? '&learningPath=' + encodeURIComponent(learningPath.id) : '';
         if (prev) {
           nav += '<a class="lesson-nav-btn prev" href="lesson.html?path=' + encodeURIComponent(prev.path) + trackSuffix + '">';
           nav += '<span class="nav-label">&larr; Previous</span>';
@@ -3844,13 +3987,15 @@
 
       function langCommand(filename, path) {
         var ext = filename.split('.').pop().toLowerCase();
-        if (ext === 'py') return 'python3 ' + path;
-        if (ext === 'ts') return 'npx tsx ' + path;
-        if (ext === 'js') return 'node ' + path;
-        if (ext === 'rs') return 'rustc ' + path + ' -o main && ./main';
-        if (ext === 'jl') return 'julia ' + path;
-        if (ext === 'sh') return 'bash ' + path;
-        return 'run ' + path;
+        var escapedPath = String(path).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+        var rootedPath = '"$(git rev-parse --show-toplevel)/' + escapedPath + '"';
+        if (ext === 'py') return 'python3 ' + rootedPath;
+        if (ext === 'ts') return 'npx tsx ' + rootedPath;
+        if (ext === 'js') return 'node ' + rootedPath;
+        if (ext === 'rs') return 'rustc ' + rootedPath + ' -o /tmp/aiefs-lesson-main && /tmp/aiefs-lesson-main';
+        if (ext === 'jl') return 'julia ' + rootedPath;
+        if (ext === 'sh') return 'bash ' + rootedPath;
+        return 'test -e ' + rootedPath;
       }
 
       function formatSize(bytes) {
@@ -3910,6 +4055,7 @@
           var badgeText = type === 'prompt' ? 'Prompt' : type === 'skill' ? (file.bundle ? 'Skill bundle' : 'Skill') : 'Output';
           var installId = 'install-hint-' + idx;
           var installHint = '';
+          var installCommand = '';
           var viewUrl = lessonFileViewUrl(file);
           var viewLabel = file.bundle ? 'Open SKILL.md' : 'Open file';
           var bundleUrl = '';
@@ -3927,7 +4073,8 @@
             var skillName = file.kind === 'skill'
               ? file.name
               : file.name.replace(/\.md$/, '').replace(/^skill-/, '');
-            installHint = 'npx skills add rohitg00/ai-engineering-from-scratch --skill ' + skillName;
+            installCommand = 'npx skills add rohitg00/ai-engineering-from-scratch --skill ' + skillName + ' --full-depth';
+            installHint = installCommand;
           }
 
           html += '<div class="output-card">';
@@ -3941,6 +4088,9 @@
           }
           if (installHint) {
             html += '<button class="output-btn" onclick="var h=document.getElementById(\'' + installId + '\');h.classList.toggle(\'visible\')">Install</button>';
+          }
+          if (installCommand) {
+            html += '<button class="output-btn output-install-copy" data-command="' + escapeAttr(installCommand) + '">Copy install</button>';
           }
           html += '</div>';
           if (installHint) {
@@ -3960,6 +4110,14 @@
         });
         html += '</div>';
         outputsEl.innerHTML = html;
+        outputsEl.querySelectorAll('.output-install-copy').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            navigator.clipboard.writeText(btn.getAttribute('data-command')).then(function () {
+              btn.textContent = 'Copied!';
+              setTimeout(function () { btn.textContent = 'Copy install'; }, 1500);
+            });
+          });
+        });
       }
 
       function renderOutputsPanel(container) {
@@ -4027,7 +4185,7 @@
       function renderCodePanel(container) {
         var panel = document.createElement('div');
         panel.className = 'ai-panel';
-        panel.innerHTML = '<div class="ai-panel-header"><div class="ai-panel-icon">C</div><div class="ai-panel-title">Run the Code</div></div><div class="ai-panel-subtitle">Executable files from this lesson</div><div id="codeContent" class="panel-loading">Loading code files...</div>';
+        panel.innerHTML = '<div class="ai-panel-header"><div class="ai-panel-icon">C</div><div class="ai-panel-title">Run the Code</div></div><div class="ai-panel-subtitle">Requires a local clone. Copy a command while your shell is anywhere inside the repository.</div><div id="codeContent" class="panel-loading">Loading code files...</div>';
         container.appendChild(panel);
 
         var codeEl = panel.querySelector('#codeContent');
@@ -4174,7 +4332,9 @@
         });
 
         html += '<div class="quiz-score" id="quizScore"><div class="quiz-score-number" id="quizScoreNum">0/' + questions.length + '</div><div class="quiz-score-label">Complete all questions to see your score</div></div>';
-        html += '<div class="quiz-deeper">Want a deeper quiz? Run <code>/check-understanding ' + escapeHtml(phase) + '</code> in Claude, Cursor, Codex, OpenClaw, Hermes, or any agent with the curriculum skills installed</div>';
+        var phaseArgumentMatch = phase.match(/^(\d+)/);
+        var phaseArgument = phaseArgumentMatch ? phaseArgumentMatch[1] : phase || 'current phase';
+        html += '<div class="quiz-deeper">Want a deeper quiz? In Codex use <code>$check-understanding ' + escapeHtml(phaseArgument) + '</code> or choose it from <code>/skills</code>. In Claude Code use <code>/check-understanding ' + escapeHtml(phaseArgument) + '</code>. In another compatible host say: <code>Use check-understanding to quiz me on Phase ' + escapeHtml(phaseArgument) + '.</code></div>';
         html += '</div>';
 
         body.innerHTML = html;
@@ -4296,6 +4456,44 @@
           return;
         }
 
+        if (learningPathMode) {
+          var focusedPanel = document.createElement('div');
+          focusedPanel.className = 'ai-panel';
+          var focusedLessons = flatLessons.filter(function (item) { return item.required !== false; });
+          var focusedIndex = focusedLessons.findIndex(function (item) { return item.path === lessonPath; });
+          var focusedDone = 0;
+          for (var fp = 0; fp < focusedLessons.length; fp++) {
+            if (window.AIFSProgress && window.AIFSProgress.isLessonComplete(focusedLessons[fp].path)) focusedDone++;
+          }
+          var focusedPct = focusedLessons.length ? Math.round((focusedDone / focusedLessons.length) * 100) : 0;
+          var focusedHtml = '<div class="ai-panel-header"><div class="ai-panel-icon">P</div><div class="ai-panel-title">Focused Learning Path</div></div>';
+          focusedHtml += '<div class="ai-panel-subtitle">' + escapeHtml(learningPath.title || learningPath.id) + '</div>';
+          focusedHtml += '<div class="learning-timeline">';
+          for (var fpi = 0; fpi < focusedLessons.length; fpi++) {
+            var focusedLesson = focusedLessons[fpi];
+            var focusedLessonDone = !!(window.AIFSProgress && window.AIFSProgress.isLessonComplete(focusedLesson.path));
+            if (fpi > 0) {
+              var focusedPreviousDone = !!(window.AIFSProgress && window.AIFSProgress.isLessonComplete(focusedLessons[fpi - 1].path));
+              focusedHtml += '<div class="timeline-line ' + (focusedPreviousDone && focusedLessonDone ? 'done' : '') + '"></div>';
+            }
+            var focusedClass = focusedLesson.path === lessonPath ? 'current' : focusedLessonDone ? 'done' : '';
+            focusedHtml += '<a class="timeline-item ' + focusedClass + '" href="' + learningPathLessonHref(focusedLesson.path) + '" title="' + escapeAttr(focusedLesson.lessonName) + '">';
+            focusedHtml += '<div class="timeline-dot"></div><div class="timeline-label">' + escapeHtml(focusedLesson.lessonName) + '</div></a>';
+          }
+          focusedHtml += '</div><div class="phase-progress-bar"><div class="phase-progress-fill" style="--lesson-progress:' + (focusedPct / 100) + '"></div></div>';
+          focusedHtml += '<div class="phase-progress-text">';
+          focusedHtml += focusedIndex >= 0
+            ? 'Lesson ' + (focusedIndex + 1) + ' of ' + focusedLessons.length + ' in this path. ' + focusedDone + ' completed.'
+            : 'Optional lesson. ' + focusedDone + ' of ' + focusedLessons.length + ' required lessons completed.';
+          focusedHtml += '</div>';
+          if (focusedIndex >= 0) {
+            focusedHtml += learningPathPrerequisiteCallout(focusedLessons[focusedIndex], 'Required before this lesson');
+          }
+          focusedPanel.innerHTML = focusedHtml;
+          mountLearningPathPanel(container, focusedPanel);
+          return;
+        }
+
         if (currentLessonIndex < 0 || typeof PHASES === 'undefined') {
           var stalePanel = document.getElementById('learningPathPanel');
           if (stalePanel) stalePanel.remove();
@@ -4406,6 +4604,39 @@
           continueHtml += '<div class="continue-callout">Practice results are course percentages, not official scaled exam scores. Use them to find the next domain to study.</div></div>';
           certContinue.innerHTML = continueHtml;
           container.appendChild(certContinue);
+          return;
+        }
+
+        if (learningPathMode) {
+          var focusedContinue = document.createElement('div');
+          focusedContinue.className = 'ai-panel';
+          var requiredLessons = flatLessons.filter(function (item) { return item.required !== false; });
+          var optionalLessons = flatLessons.filter(function (item) { return item.required === false; });
+          var requiredIndex = requiredLessons.findIndex(function (item) { return item.path === lessonPath; });
+          var nextRequired = requiredIndex >= 0 && requiredIndex < requiredLessons.length - 1
+            ? requiredLessons[requiredIndex + 1]
+            : null;
+          var focusedContinueHtml = '<div class="ai-panel-header"><div class="ai-panel-icon">N</div><div class="ai-panel-title">Continue This Path</div></div><div class="continue-panel">';
+          if (!nextRequired) focusedContinueHtml += '<div class="phase-finished">You reached the end of the required route.</div>';
+          if (nextRequired) {
+            focusedContinueHtml += learningPathPrerequisiteCallout(nextRequired, 'Required before ' + nextRequired.lessonName);
+          }
+          focusedContinueHtml += '<div class="continue-links">';
+          if (nextRequired) {
+            focusedContinueHtml += '<a class="continue-link" href="' + learningPathLessonHref(nextRequired.path) + '">Next: ' + escapeHtml(nextRequired.lessonName) + '</a>';
+          } else {
+            for (var oi = 0; oi < optionalLessons.length; oi++) {
+              if (optionalLessons[oi].path === lessonPath) continue;
+              focusedContinueHtml += '<a class="continue-link" href="' + learningPathLessonHref(optionalLessons[oi].path) + '">Optional capstone: ' + escapeHtml(optionalLessons[oi].lessonName) + '</a>';
+            }
+          }
+          if (requiredLessons.length) {
+            focusedContinueHtml += '<a class="continue-link" href="' + learningPathLessonHref(requiredLessons[0].path) + '">Start this path again</a>';
+          }
+          focusedContinueHtml += '<a class="continue-link" href="catalog.html">Full course catalog</a></div>';
+          focusedContinueHtml += '<div class="continue-callout">' + escapeHtml(learningPath.summary || 'Follow the ordered lessons to build, invoke, secure, evaluate, and package an agent skill.') + '</div></div>';
+          focusedContinue.innerHTML = focusedContinueHtml;
+          container.appendChild(focusedContinue);
           return;
         }
 

@@ -7,7 +7,18 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-const { discoverArtifacts } = require('./build.js');
+const {
+  discoverArtifacts,
+  parseLearningPaths,
+  parseReadme,
+  parseRoadmap,
+} = require('./build.js');
+const {
+  learningPathDestination,
+  rebuildIndex,
+  resultIndexForEnter,
+  search,
+} = require('./cmdpalette.js');
 
 function loadContentSource() {
   const context = {
@@ -199,4 +210,127 @@ test('lesson output merging preserves bundle identity and unmatched live files',
   assert.equal(withoutDirectoryListing.length, 2);
   assert.equal(withoutDirectoryListing[0], flat);
   assert.equal(withoutDirectoryListing[1], bundle);
+});
+
+test('learning path manifests preserve route order and use canonical lesson titles', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aiefs-learning-paths-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'learning-paths'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'learning-paths', 'agent-skills.json'), JSON.stringify({
+    id: 'agent-skills',
+    title: 'Agent Skills',
+    summary: 'Build portable skills that agents can discover and invoke.',
+    estimatedMinutes: 570,
+    lessons: [
+      { order: 1, path: 'phases/13-tools-and-protocols/22-skills-and-agent-sdks', title: 'Stale title' },
+      {
+        path: 'phases/13-tools-and-protocols/24-skill-discovery-and-progressive-disclosure',
+        prerequisitePaths: ['phases/13-tools-and-protocols/22-skills-and-agent-sdks'],
+      },
+    ],
+    optionalLessons: [
+      { path: 'phases/13-tools-and-protocols/23-capstone-tool-ecosystem' },
+    ],
+  }));
+  const github = 'https://github.com/rohitg00/ai-engineering-from-scratch/tree/main/';
+  const phases = [{
+    id: 13,
+    name: 'Tools and Protocols',
+    lessons: [
+      { name: 'Skills and Agent SDKs', type: 'Build', lang: 'Python', url: github + 'phases/13-tools-and-protocols/22-skills-and-agent-sdks/' },
+      { name: 'Tool Ecosystem Capstone', type: 'Capstone', lang: 'Python', url: github + 'phases/13-tools-and-protocols/23-capstone-tool-ecosystem/' },
+      { name: 'Skill Discovery and Progressive Disclosure', type: 'Learn', lang: 'Python', url: github + 'phases/13-tools-and-protocols/24-skill-discovery-and-progressive-disclosure/' },
+    ],
+  }];
+
+  const [learningPath] = parseLearningPaths(root, phases);
+
+  assert.equal(learningPath.id, 'agent-skills');
+  assert.deepEqual(learningPath.lessons.map(entry => entry.path), [
+    'phases/13-tools-and-protocols/22-skills-and-agent-sdks',
+    'phases/13-tools-and-protocols/24-skill-discovery-and-progressive-disclosure',
+  ]);
+  assert.deepEqual(learningPath.lessons.map(entry => entry.title), [
+    'Skills and Agent SDKs',
+    'Skill Discovery and Progressive Disclosure',
+  ]);
+  assert.equal(learningPath.lessons[0].required, true);
+  assert.deepEqual(learningPath.lessons[1].prerequisitePaths, [
+    'phases/13-tools-and-protocols/22-skills-and-agent-sdks',
+  ]);
+  assert.equal(learningPath.optionalLessons[0].required, false);
+});
+
+test('repository Agent Skills path routes 22 to 24 and keeps 23 optional', () => {
+  const root = path.resolve(__dirname, '..');
+  const roadmap = parseRoadmap(fs.readFileSync(path.join(root, 'ROADMAP.md'), 'utf8'));
+  const phases = parseReadme(fs.readFileSync(path.join(root, 'README.md'), 'utf8'), roadmap);
+  const learningPath = parseLearningPaths(root, phases).find(entry => entry.id === 'agent-skills');
+
+  assert.ok(learningPath);
+  assert.deepEqual(learningPath.lessons.map(entry => entry.lesson), [22, 24, 25, 26, 27]);
+  assert.deepEqual(learningPath.optionalLessons.map(entry => entry.lesson), [23]);
+  assert.equal(learningPath.lessons[0].path, 'phases/13-tools-and-protocols/22-skills-and-agent-sdks');
+  assert.equal(learningPath.lessons[1].path, 'phases/13-tools-and-protocols/24-skill-discovery-and-progressive-disclosure');
+  assert.deepEqual(learningPath.lessons[3].prerequisitePaths, [
+    'phases/13-tools-and-protocols/15-mcp-security-tool-poisoning',
+    'phases/13-tools-and-protocols/25-skill-invocation-and-routing',
+  ]);
+});
+
+test('learning path query and Enter fallback open the first result predictably', () => {
+  assert.equal(
+    learningPathDestination('phases/13-tools-and-protocols/22-skills-and-agent-sdks', 'agent-skills'),
+    'lesson.html?path=phases%2F13-tools-and-protocols%2F22-skills-and-agent-sdks&learningPath=agent-skills'
+  );
+  assert.equal(resultIndexForEnter(-1, 5), 0);
+  assert.equal(resultIndexForEnter(3, 5), 3);
+  assert.equal(resultIndexForEnter(-1, 0), -1);
+});
+
+test('exact Agent Skills search ranks the focused path before individual lessons', () => {
+  global.LEARNING_PATHS = [{
+    id: 'agent-skills',
+    title: 'Agent Skills Engineering',
+    summary: 'A focused route.',
+    estimatedMinutes: 570,
+    lessons: [{ path: 'phases/13-tools-and-protocols/22-skills-and-agent-sdks' }],
+  }];
+  global.PHASES = [{
+    id: 13,
+    name: 'Tools and Protocols',
+    lessons: [{
+      name: 'Agent Skills: Portable Contract and Runtime Boundary',
+      summary: 'Learn agent skills.',
+      url: 'https://github.com/rohitg00/ai-engineering-from-scratch/tree/main/phases/13-tools-and-protocols/22-skills-and-agent-sdks/',
+    }],
+  }];
+
+  try {
+    rebuildIndex();
+    const [first] = search('Agent Skills');
+    assert.equal(first.kind, 'learning-path');
+    assert.equal(first.url, 'lesson.html?path=phases%2F13-tools-and-protocols%2F22-skills-and-agent-sdks&learningPath=agent-skills');
+  } finally {
+    delete global.LEARNING_PATHS;
+    delete global.PHASES;
+    rebuildIndex();
+  }
+});
+
+test('lesson reader keeps learning-path context and renders a copyable full-depth install', () => {
+  const lessonHtml = fs.readFileSync(path.join(__dirname, 'lesson.html'), 'utf8');
+
+  assert.match(lessonHtml, /requestedLearningPathId = params\.get\('learningPath'\)/);
+  assert.match(lessonHtml, /Lesson ' \+ \(focusedIndex \+ 1\) \+ ' of ' \+ focusedLessons\.length/);
+  assert.match(lessonHtml, /prerequisitePaths: pathEntry/);
+  assert.match(lessonHtml, /learningPathPrerequisiteCallout\(nextRequired/);
+  assert.match(lessonHtml, /--skill ' \+ skillName \+ ' --full-depth/);
+  assert.match(lessonHtml, /class="output-btn output-install-copy"/);
+  assert.match(lessonHtml, /Requires a local clone/);
+  assert.match(lessonHtml, /git rev-parse --show-toplevel/);
+  assert.match(lessonHtml, /lessonQuizCorrectAnswers\[qid\] = q\.correct/);
+  assert.doesNotMatch(lessonHtml, /data-correct=/);
+  assert.match(lessonHtml, /\$check-understanding/);
+  assert.match(lessonHtml, /\/check-understanding/);
 });

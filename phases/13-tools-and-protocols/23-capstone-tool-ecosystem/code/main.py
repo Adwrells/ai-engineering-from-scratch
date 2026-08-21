@@ -1,8 +1,9 @@
-"""Phase 13 Capstone - in-process research-and-report simulation.
+"""Phase 13 Capstone - stateless in-process research-and-report simulation.
 
 Several Phase 13 boundaries in one readable demo:
   - gateway-shaped static token lookup and RBAC
-  - local tool functions returning task- and ui-shaped data
+  - per-request protocol metadata and mandatory server discovery
+  - local tool functions returning task-extension and ui-shaped data
   - A2A-shaped writer delegation represented by a nested span
   - in-memory trace dictionaries sharing one trace id
   - pinned-hash manifest guarding description mutations
@@ -19,10 +20,89 @@ import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass, field
+from copy import deepcopy
+from datetime import datetime, timezone
 
 
 SPANS: list[dict] = []
+TASKS: dict[str, dict] = {}
+
+PROTOCOL_VERSION = "2026-07-28"
+TASK_EXTENSION = "io.modelcontextprotocol/tasks"
+SERVER_INFO = {"name": "research-simulator", "version": "1.0.0"}
+
+
+def request_meta(*, tasks: bool = False) -> dict:
+    extensions = {TASK_EXTENSION: {}} if tasks else {}
+    return {
+        "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
+        "io.modelcontextprotocol/clientCapabilities": {"extensions": extensions},
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "capstone-client",
+            "version": "1.0.0",
+        },
+    }
+
+
+def _server_meta() -> dict:
+    return {"io.modelcontextprotocol/serverInfo": deepcopy(SERVER_INFO)}
+
+
+def complete_result(**fields: object) -> dict:
+    return {"resultType": "complete", **fields, "_meta": _server_meta()}
+
+
+def protocol_error(code: int, message: str, data: dict | None = None) -> dict:
+    error = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    return {"error": error}
+
+
+def validate_request_meta(meta: dict, *, require_tasks: bool = False) -> dict | None:
+    if not isinstance(meta, dict):
+        return protocol_error(-32602, "params._meta must be an object")
+    requested = meta.get("io.modelcontextprotocol/protocolVersion")
+    if not isinstance(requested, str):
+        return protocol_error(-32602, "protocolVersion must be a string")
+    if requested != PROTOCOL_VERSION:
+        return protocol_error(
+            -32022,
+            "Unsupported protocol version",
+            {"supported": [PROTOCOL_VERSION], "requested": requested},
+        )
+    capabilities = meta.get("io.modelcontextprotocol/clientCapabilities")
+    if not isinstance(capabilities, dict):
+        return protocol_error(-32602, "clientCapabilities must be an object")
+    extensions = capabilities.get("extensions", {})
+    if require_tasks and (
+        not isinstance(extensions, dict) or TASK_EXTENSION not in extensions
+    ):
+        return protocol_error(
+            -32021,
+            "Missing required client capability",
+            {
+                "requiredCapabilities": {
+                    "extensions": {TASK_EXTENSION: {}}
+                }
+            },
+        )
+    return None
+
+
+def server_discover(meta: dict) -> dict:
+    invalid = validate_request_meta(meta)
+    if invalid:
+        return invalid
+    return complete_result(
+        supportedVersions=[PROTOCOL_VERSION],
+        capabilities={
+            "tools": {"listChanged": False},
+            "extensions": {TASK_EXTENSION: {}},
+        },
+        ttlMs=3_600_000,
+        cacheScope="public",
+    )
 
 
 def _hex(n: int) -> str:
@@ -60,7 +140,10 @@ PINNED = {f"research::{t['name']}": hashlib.sha256(t["description"].encode()).he
 def research_arxiv_search(args: dict) -> dict:
     q = args["query"].lower()
     hits = [p for p in PAPERS if q in p["title"].lower()]
-    return {"content": [{"type": "text", "text": json.dumps(hits)}], "isError": False}
+    return complete_result(
+        content=[{"type": "text", "text": json.dumps(hits)}],
+        isError=False,
+    )
 
 
 def research_generate_report(args: dict, trace_id: str, parent: str) -> dict:
@@ -77,17 +160,49 @@ def research_generate_report(args: dict, trace_id: str, parent: str) -> dict:
         + "".join(f"<li>{p['arxiv_id']}: {p['title']}</li>" for p in PAPERS)
         + "</ul><script>/* A real MCP App bridge is intentionally absent. */</script></body></html>"
     )
-    return {
-        "_meta": {"task": {"id": task_id, "state": "completed", "ttl": 900_000},
-                  "ui": {"resourceUri": "ui://report/current",
-                         "csp": {"default-src": "'self'"},
-                         "permissions": []}},
-        "content": [
-            {"type": "text", "text": "Report generated: 3 papers summarized."},
-            {"type": "ui_resource", "uri": "ui://report/current"},
-        ],
-        "_html": html,
+    now = datetime.now(timezone.utc).isoformat()
+    TASKS[task_id] = {
+        "resultType": "complete",
+        "taskId": task_id,
+        "status": "completed",
+        "createdAt": now,
+        "lastUpdatedAt": now,
+        "ttlMs": 900_000,
+        "pollIntervalMs": 1_000,
+        "result": complete_result(
+            content=[
+                {"type": "text", "text": "Report generated: 3 papers summarized."},
+                {"type": "ui_resource", "uri": "ui://report/current"},
+            ],
+            ui={
+                "resourceUri": "ui://report/current",
+                "csp": {"default-src": "'self'"},
+                "permissions": [],
+            },
+            html=html,
+        ),
+        "_meta": _server_meta(),
     }
+    return {
+        "resultType": "task",
+        "taskId": task_id,
+        "status": "working",
+        "createdAt": now,
+        "lastUpdatedAt": now,
+        "ttlMs": 900_000,
+        "pollIntervalMs": 1_000,
+        "_meta": _server_meta(),
+    }
+
+
+def tasks_get(task_id: str, meta: dict) -> dict:
+    invalid = validate_request_meta(meta, require_tasks=True)
+    if invalid:
+        return invalid
+    task = TASKS.get(task_id)
+    if task is None:
+        return protocol_error(-32602, "Unknown taskId")
+    return deepcopy(task)
 
 
 USERS = {
@@ -105,7 +220,12 @@ def pin_ok(tool_name: str, description: str) -> bool:
 
 
 def gateway_call(token: str, tool_name: str, args: dict,
-                 trace_id: str, parent: str) -> dict:
+                 trace_id: str, parent: str, meta: dict) -> dict:
+    invalid = validate_request_meta(
+        meta, require_tasks=tool_name == "generate_report"
+    )
+    if invalid:
+        return invalid
     u = USERS.get(token)
     if not u:
         return {"error": "unauthenticated"}
@@ -142,9 +262,14 @@ def orchestrator(token: str, user_query: str) -> dict:
     finish(llm1)
 
     search = gateway_call(token, "arxiv_search",
-                          {"query": "agent protocol"}, trace_id, root["spanId"])
+                          {"query": "agent"}, trace_id, root["spanId"],
+                          request_meta())
     report = gateway_call(token, "generate_report",
-                          {"format": "html"}, trace_id, root["spanId"])
+                          {"format": "html"}, trace_id, root["spanId"],
+                          request_meta(tasks=True))
+    task = None
+    if report.get("resultType") == "task":
+        task = tasks_get(report["taskId"], request_meta(tasks=True))
 
     llm2 = span("llm.chat", "CLIENT", trace_id, root["spanId"],
                 {"gen_ai.operation.name": "chat", "gen_ai.provider.name": "openai",
@@ -152,7 +277,7 @@ def orchestrator(token: str, user_query: str) -> dict:
     finish(llm2)
 
     finish(root)
-    return {"trace_id": trace_id, "search": search, "report": report}
+    return {"trace_id": trace_id, "search": search, "report": report, "task": task}
 
 
 def demo() -> None:
@@ -160,12 +285,18 @@ def demo() -> None:
     print("PHASE 13 CAPSTONE - RESEARCH AND REPORT ECOSYSTEM")
     print("=" * 72)
 
+    print("\n--- stateless server discovery ---")
+    discovery = server_discover(request_meta())
+    print(f"  protocol       : {discovery['supportedVersions'][0]}")
+    print(f"  task extension : {TASK_EXTENSION in discovery['capabilities']['extensions']}")
+
     print("\n--- orchestrator run as alice (read+write) ---")
     out = orchestrator("tok_alice", "summarize the three most-cited 2026 arXiv papers")
     print(f"  trace id      : {out['trace_id']}")
     print(f"  search result : {out['search']['content'][0]['text']}")
-    print(f"  report status : task completed, ui:// resource returned")
-    print(f"  ui bytes      : {len(out['report']['_html'])}")
+    print(f"  report handle : {out['report']['taskId']} ({out['report']['status']})")
+    print(f"  task status   : {out['task']['status']} via tasks/get")
+    print(f"  ui bytes      : {len(out['task']['result']['html'])}")
 
     print("\n--- orchestrator run as bob (read only) ---")
     out = orchestrator("tok_bob", "generate a report")
@@ -185,8 +316,9 @@ def demo() -> None:
     print("\n--- primitive coverage ---")
     covered = [
         "tool interface and direct function dispatch",
+        "server/discover and per-request stateless metadata",
         "structured content dictionaries",
-        "task-shaped identifier and completed result",
+        "task-extension handle and tasks/get polling",
         "ui://-shaped resource reference",
         "description mutation detection with pinned hashes",
         "static-token scope and gateway policy simulation",

@@ -1,6 +1,6 @@
 {
   "lesson": "23-capstone-tool-ecosystem",
-  "title": "Capstone: Tool Ecosystem",
+  "title": "Capstone: Stateless Tool Ecosystem",
   "questions": [
     {
       "stage": "pre",
@@ -16,15 +16,15 @@
     },
     {
       "stage": "check",
-      "question": "Which MCP method polls the current state of a task in the 2025-11-25 specification?",
+      "question": "Which flow matches MCP revision 2026-07-28 for discovering a server and polling long-running work?",
       "options": [
-        "tasks/get",
-        "tasks/status",
-        "tasks/result",
-        "tools/poll"
+        "server/connect, tools/poll, tasks/status",
+        "server/discover, tools/call returning a task handle, tasks/get",
+        "initialize, tools/call, tasks/result",
+        "GET /mcp, tools/call, tasks/list"
       ],
-      "correct": 0,
-      "explanation": "`tasks/get` retrieves current task state. `tasks/result` retrieves the final result, while `tasks/status` and `tools/poll` are not the specified methods."
+      "correct": 1,
+      "explanation": "The stateless revision uses mandatory `server/discover`. The optional `io.modelcontextprotocol/tasks` extension returns a task handle and uses `tasks/get`; a terminal task carries its final result. The old handshake, GET endpoint, `tasks/result`, and `tasks/list` are not in this flow."
     },
     {
       "stage": "check",

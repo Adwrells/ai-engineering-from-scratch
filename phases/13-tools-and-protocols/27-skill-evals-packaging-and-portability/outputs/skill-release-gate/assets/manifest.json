@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "algorithm": "sha256",
   "files": {
-    "SKILL.md": "sha256:96214fb4feea773f805bfcc7f3ef89dca3c7ab20f8544e8dcf684dde94d71925",
+    "SKILL.md": "sha256:b57d0f111224c29bc589aefedd2d88c825177f22a3dcee21fd6590f68efd4453",
     "assets/hosts.json": "sha256:2fda2f2813f3cd148f42a4fc5f44d04954021681430901197003265930950323",
     "evals/artifacts.json": "sha256:4be0a182bfcf799decf0589e5e72744caf1a81caf3dbad40fe2ff68d8aad7041",
     "evals/cases.json": "sha256:ab96a4f1af5c96e0adb64a6b3620e407e7e5a1952fb1bfb6599ec83426c22aff",

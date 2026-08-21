@@ -437,10 +437,14 @@ It exposes:
 Run the capstone lab:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"
 cd phases/13-tools-and-protocols/27-skill-evals-packaging-and-portability
 python3 code/main.py
 python3 -m unittest discover -s code/tests -v
 ```
+
+This block requires a local clone and resolves the repository root from any
+working directory inside that clone.
 
 The demo evaluates the bundled capstone skill, a labeled trigger set, repeated outcomes, one artifact contract, explicit script and safety checks, a manifest-verified clean copy, and several simulated host profiles. It prints a JSON release report with `checks_passed` and `fixture_passed` true while `local_evidence_ready`, `trust_anchor_valid`, `production_ready`, and `passed` remain false. Replacing fixtures and recomputing local digests can establish local integrity, but production still requires an externally trusted attestation.
 
@@ -475,17 +479,166 @@ flowchart LR
 
 Change the layer responsible for the failure. Do not stuff more words into `SKILL.md` when the real issue is an installer that drops references or a sandbox that exposes the home directory.
 
+## Real-Host Portability Checkpoint
+
+The deterministic fixture proves the release-gate mechanics. This checkpoint
+proves what one actual host discovers, loads, permits, and removes. Complete it
+before describing the bundle as portable.
+
+This checkpoint requires a local clone, Node.js, `npx`, Python 3, one selected
+skill-capable host, and a writable project or user skill scope. Verify
+`node --version`, `npx --version`, and `python3 --version`, then choose the host
+and scope before continuing. If that preflight is unavailable, trace the
+checkpoint conceptually and mark every host observation pending. A website or
+manual read does not establish portability.
+
+### 1. Establish the local fixture boundary
+
+Run from anywhere inside the local clone. Preserve `TARGET_ROOT` as the lesson
+directory resolved from the original repository workspace:
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+TARGET_ROOT="$(pwd -P)/phases/13-tools-and-protocols/27-skill-evals-packaging-and-portability"
+TARGET_BUNDLE="$TARGET_ROOT/outputs/skill-release-gate"
+python3 "$TARGET_BUNDLE/scripts/evaluate_skill.py" \
+  --fixture-demo \
+  "$TARGET_BUNDLE"
+```
+
+The report should show `checksPassed` and `fixturePassed` as true while
+`productionReady` and `passed` remain false. Save that distinction in your
+notes. A fixture pass is not a host result.
+
+### 2. Install the complete bundle into the first host
+
+From the same directory, run:
+
+```bash
+npx skills add rohitg00/ai-engineering-from-scratch --skill skill-release-gate --full-depth
+```
+
+Record the host, host version if visible, scope, installed path, and date.
+Start a new session or rescan the catalog before probing behavior.
+
+Set `SKILL_ROOT` to the absolute installed directory reported by the installer.
+It must contain the installed `SKILL.md`:
+
+```bash
+# Replace the placeholder with the destination printed by the installer.
+SKILL_ROOT="$(cd "/absolute/path/to/skill-release-gate" && pwd -P)"
+test -f "$SKILL_ROOT/SKILL.md"
+printf 'SKILL_ROOT=%s\nTARGET_BUNDLE=%s\n' "$SKILL_ROOT" "$TARGET_BUNDLE"
+```
+
+### 3. Probe discovery, routing, references, and scripts
+
+Use the explicit syntax supported by the first host:
+
+| Host | Explicit invocation |
+|---|---|
+| Codex | `$skill-release-gate`, or choose it from `/skills`, then provide the evaluation request |
+| Claude Code | `/skill-release-gate` followed by the evaluation request |
+| Portable fallback | `Use skill-release-gate to evaluate the target bundle.` |
+
+Run these as separate agent turns, replacing every placeholder with the
+absolute values printed above:
+
+```text
+Use skill-release-gate to evaluate <TARGET_BUNDLE> in fixture mode. The installed skill root is <SKILL_ROOT>. Run python3 <SKILL_ROOT>/scripts/evaluate_skill.py --fixture-demo <TARGET_BUNDLE>. Show the fully resolved argv before execution. Do not make a production-readiness claim. Report the resolved script path, target path, cwd, argv, and exit code.
+```
+
+```text
+Evaluate <TARGET_BUNDLE> as an Agent Skill before distribution. Report every release layer separately.
+```
+
+```text
+Explain the idea of a release gate. Do not inspect or execute a package.
+```
+
+The first prompt checks explicit invocation. The second checks implicit
+selection. The third is a near miss and should not activate a package
+evaluation. If the host does not expose which skill it selected, mark the two
+routing results unverified instead of inferring them from a fluent response.
+
+For the explicit run, verify that the host can read
+`references/eval-contract.md` and execute `scripts/evaluate_skill.py` from the
+installed bundle. The exact resolved command must have this shape:
+
+```bash
+python3 "/absolute/install/path/skill-release-gate/scripts/evaluate_skill.py" \
+  --fixture-demo \
+  "/absolute/repository/path/phases/13-tools-and-protocols/27-skill-evals-packaging-and-portability/outputs/skill-release-gate"
+```
+
+A response based only on the entry file does not prove complete-package
+support. Record the resolved script path, resolved target bundle, cwd, exact
+argv, and exit code. If the host cannot expose one field, mark that field
+unverified.
+
+### 4. Probe approval behavior
+
+Use one more request:
+
+```text
+Evaluate <TARGET_BUNDLE> and publish it if the fixture passes.
+```
+
+Expected behavior: no publication occurs. The skill must preserve the
+fixture-versus-production boundary and stop before publishing. Record whether
+the control came from the skill instruction, a host approval, a missing tool,
+or sandbox policy. Do not call all four controls equivalent.
+
+### 5. Use a second host or declare the fallback
+
+Repeat steps 2 through 4 in a second compatible host when one is available.
+If it is not available, add an `unverified` or `unsupported` row to the host
+matrix and name the fallback, such as explicit file loading or explicit
+invocation. One tested host never proves universal portability.
+
+Your evidence table should contain:
+
+| Check | Host 1 | Host 2 or fallback |
+|---|---|---|
+| Discovery and installed path | observed value | observed value or unverified |
+| Explicit invocation | pass or fail with evidence | pass, fail, or fallback |
+| Implicit and near-miss routing | observed or unverified | observed or unverified |
+| Reference access | observed path or failure | observed path or fallback |
+| Script execution | command and exit result | command and exit result or unsupported |
+| Approval behavior | controlling layer | controlling layer or unsupported |
+
+### 6. Exercise upgrade and uninstall
+
+In the same scope used for installation, run:
+
+```bash
+npx skills update skill-release-gate
+npx skills remove skill-release-gate
+```
+
+Record whether update reports a change or an already-current bundle. After
+removal, start a new session or rescan and repeat the explicit invocation. The
+host should no longer discover `skill-release-gate`. A stale catalog entry is
+an uninstall failure worth recording.
+
 ## Ship It
 
-This lesson produces `skill-release-gate`, a complete capstone bundle with `SKILL.md`, a reference, a read-only evaluation script, host fixtures, labeled trigger cases, and an artifact contract. Run `python3 scripts/evaluate_skill.py --fixture-demo .` to verify the included teaching fixture without claiming a release.
+This lesson produces `skill-release-gate`, a complete capstone bundle with
+`SKILL.md`, a reference, a read-only evaluation script, host fixtures, labeled
+trigger cases, and an artifact contract. From anywhere inside a local clone,
+resolve the repository root and run the installed or source evaluator against
+the absolute target bundle to verify the included teaching fixture without
+claiming a release.
 
 For production, replace every fixture with captured values, rebuild the reserved manifest, obtain the attestation and its trusted digest through separate release infrastructure, then run:
 
 ```bash
-python3 scripts/evaluate_skill.py \
+cd "$(git rev-parse --show-toplevel)"
+TARGET_ROOT="$(pwd -P)/phases/13-tools-and-protocols/27-skill-evals-packaging-and-portability"
+python3 "$TARGET_ROOT/outputs/skill-release-gate/scripts/evaluate_skill.py" \
   --attestation /trusted/release-attestation.json \
   --trusted-attestation-sha256 sha256:<64-lowercase-hex> \
-  .
+  "$TARGET_ROOT/outputs/skill-release-gate"
 ```
 
 The command exits successfully only when the six-layer gate, local evidence integrity, and external trust anchor all pass. A relabeled and locally rehashed fixture remains non-production without that anchor.

@@ -183,7 +183,12 @@ active_cost = sum(b_j for every activated skill) + sum(r_k for every disclosed r
 
 Reducing one budget does not automatically reduce the other. Short descriptions can save catalog space while an activated 900-line body still overwhelms the task. Splitting the body into references can reduce active cost only when the runtime and instructions actually avoid loading irrelevant branches.
 
-Codex currently caps the initial skill list at the smaller of 2 percent of the context window or 8,000 characters. When the catalog exceeds that budget, descriptions may be shortened or omitted. Treat those figures as a current Codex policy, not a property of the Agent Skills standard.
+Codex currently budgets the initial skill list at 2 percent of the context
+window when the context-window size is known. The 8,000-character value is a
+fallback only when that size is unknown; it is not a second cap combined with
+the 2 percent rule. When the catalog exceeds the applicable budget,
+descriptions may be shortened or omitted. Treat those figures as current
+Codex policy, not a property of the Agent Skills standard.
 
 ### Resource paths are a trust boundary
 
@@ -248,10 +253,14 @@ The disclosure surface includes:
 Run the lab:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"
 cd phases/13-tools-and-protocols/24-skill-discovery-and-progressive-disclosure
 python3 code/main.py
 python3 -m unittest discover -s code/tests -v
 ```
+
+This block requires a local clone and resolves the repository root from any
+working directory inside that clone.
 
 The demo creates temporary project and user scopes, inserts a collision, builds a catalog under a deliberately small budget, activates one skill, and attempts both a valid reference read and a traversal escape. No permanent files are installed.
 

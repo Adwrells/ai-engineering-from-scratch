@@ -348,10 +348,12 @@
     if (record.reduced) {
       record.control.textContent = 'Motion reduced';
       record.control.disabled = true;
+      record.control.setAttribute('aria-label', 'Animation disabled because reduced motion is enabled');
       record.control.setAttribute('aria-pressed', 'true');
     } else {
       record.control.disabled = false;
       record.control.textContent = record.userPaused ? 'Play animation' : 'Pause animation';
+      record.control.setAttribute('aria-label', record.userPaused ? 'Play explanatory animation' : 'Pause explanatory animation');
       record.control.setAttribute('aria-pressed', record.userPaused ? 'true' : 'false');
     }
   }

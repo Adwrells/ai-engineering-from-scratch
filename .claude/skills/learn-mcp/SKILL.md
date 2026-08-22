@@ -77,6 +77,19 @@ conceptual lesson must remain available without a clone.
 Use `MCP-LEARNING.md` in the current working directory. Do not put
 this route in `LEARNING.md` and do not modify Agent Skills progress.
 
+Before deciding that no state exists, handle the former filename safely:
+
+1. If `MCP-LEARNING.md` exists, use it. If
+   `MCP-ENGINEERING-LEARNING.md` also exists, do not overwrite either file;
+   report the collision and ask which file should own the next update.
+2. If `MCP-LEARNING.md` is absent and `MCP-ENGINEERING-LEARNING.md` exists,
+   rename the legacy file to `MCP-LEARNING.md` in the same directory before
+   teaching. Preserve every learner note and evidence row byte for byte. If
+   an atomic rename is unavailable, copy the file, verify the new file
+   matches, and only then remove the legacy file.
+3. Create a new state file only when neither filename exists. Never replace
+   legacy progress with the blank template below.
+
 If the file exists, preserve all learner notes and evidence. Resume the first
 row marked `In progress` or `Next`. If all required rows are `Done`, check the
 optional capstone prerequisites and report the exact missing path instead of

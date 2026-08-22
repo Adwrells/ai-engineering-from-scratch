@@ -48,9 +48,10 @@ https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/<pat
 
 ## Focused MCP handoff
 
-If the learner asks for the Model Context Protocol (MCP) path, or
-`MCP-LEARNING.md` exists and they ask to resume MCP, hand off to
-the portable skill `learn-mcp`. Its source of truth is
+If the learner asks for the Model Context Protocol (MCP) path, or either
+`MCP-LEARNING.md` or `MCP-ENGINEERING-LEARNING.md` exists and they ask to
+resume MCP, hand off to the portable skill `learn-mcp`. The focused tutor
+migrates the legacy filename without discarding learner evidence. Its source of truth is
 `learning-paths/model-context-protocol.json`. Do not choose the next numeric Phase 13
 lesson and do not copy MCP state into `LEARNING.md`; the dedicated tutor owns
 the route order, wire checkpoints, and security gate.

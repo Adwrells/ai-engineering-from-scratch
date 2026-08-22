@@ -240,6 +240,43 @@ function writeMarkdown(file, { name, description, version }) {
   ].join('\n'));
 }
 
+test('shared mutable site assets use one release cache key on every page', () => {
+  const release = '20260822a';
+  const pages = [
+    'about.html',
+    'assessment.html',
+    'catalog.html',
+    'certification.html',
+    'certifications.html',
+    'glossary.html',
+    'index.html',
+    'lesson.html',
+    'prereqs.html',
+  ];
+  const sourceFor = page => fs.readFileSync(path.join(__dirname, page), 'utf8');
+  const versionFor = (source, asset) => {
+    const escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = source.match(new RegExp(`${escaped}\\?v=([a-z0-9.-]+)`, 'i'));
+    assert.ok(match, `${asset} is missing a cache key`);
+    return match[1];
+  };
+
+  for (const page of pages) {
+    const source = sourceFor(page);
+    assert.equal(versionFor(source, 'style.css'), release, `${page} has stale style.css`);
+    assert.equal(versionFor(source, 'progress.js'), release, `${page} has stale progress.js`);
+    assert.equal(versionFor(source, 'header.js'), release, `${page} has stale header.js`);
+  }
+
+  assert.equal(versionFor(sourceFor('index.html'), 'app.js'), release);
+  assert.equal(versionFor(sourceFor('prereqs.html'), 'roadmap.css'), release);
+  assert.equal(versionFor(sourceFor('prereqs.html'), 'roadmap.js'), release);
+  assert.match(
+    fs.readFileSync(path.join(__dirname, 'header.js'), 'utf8'),
+    new RegExp(`NARRATION_VERSION = '${release}'`)
+  );
+});
+
 test('site discovery emits one bundle linked to SKILL.md and preserves flat records', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aiefs-site-artifacts-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -680,6 +717,8 @@ test('lesson reader keeps learning-path context and renders a copyable full-dept
   assert.match(lessonHtml, /\.code-card-run \{[\s\S]*?white-space: pre-wrap;[\s\S]*?overflow-wrap: anywhere;/);
   assert.doesNotMatch(lessonHtml, /\.code-card-run::-[a-z-]*scrollbar/);
   assert.match(lessonHtml, /Run from the repository root, the folder containing README\.md/);
+  assert.match(lessonHtml, /Run copied commands from the repository root, the directory containing README\.md and phases\//);
+  assert.doesNotMatch(lessonHtml, /shell is anywhere inside the repository/);
   assert.match(lessonHtml, /inferLearningPath\(lessonPath\)/);
   assert.match(lessonHtml, /preferredIds = \['agent-skills', 'model-context-protocol'\]/);
   assert.match(lessonHtml, /A code fence is not automatically a runnable program/);
@@ -785,6 +824,58 @@ test('MCP lesson labs override legacy figures with modern inspectable protocol o
   ].forEach(field => {
     assert.ok(moduleSource.includes(field), `missing MCP lab field: ${field}`);
   });
+});
+
+test('every Agent Skills figure mounts through the shared lesson runtime', () => {
+  const rootPath = path.resolve(__dirname, '..');
+  const manifest = buildFigureProviderManifest(rootPath, __dirname);
+  const figureIds = Object.entries(manifest.providersByFigure)
+    .filter(([, providers]) => providers.at(-1) === 'figures-agent-skills.js')
+    .map(([figureId]) => figureId)
+    .sort();
+  assert.equal(figureIds.length, 19);
+
+  const runtime = loadFigureRuntime({ reducedMotion: true });
+  vm.runInNewContext(
+    fs.readFileSync(path.join(__dirname, 'figures-agent-skills.js'), 'utf8'),
+    {
+      console,
+      document: runtime.window.document,
+      window: runtime.window,
+    },
+    { filename: path.join(__dirname, 'figures-agent-skills.js') }
+  );
+
+  const hosts = figureIds.map(figureId => {
+    const host = runtime.element('div');
+    host.dataset.figure = figureId;
+    return host;
+  });
+  const root = runtime.element('article');
+  root.querySelectorAll = selector => selector === '.lesson-figure[data-figure]' ? hosts : [];
+  runtime.window.mountLessonFigures(root);
+
+  const findDescendant = (node, predicate) => {
+    if (predicate(node)) return node;
+    for (const child of node.children || []) {
+      const match = findDescendant(child, predicate);
+      if (match) return match;
+    }
+    return null;
+  };
+
+  for (const host of hosts) {
+    assert.equal(host.dataset.lfMounted, '1', `${host.dataset.figure} did not mount`);
+    assert.ok(
+      findDescendant(host, node => node.className === 'asf-shell'),
+      `${host.dataset.figure} did not render its staged shell`
+    );
+    const range = findDescendant(host, node => node.className === 'asf-range');
+    assert.ok(range, `${host.dataset.figure} did not render its step control`);
+    assert.match(range.getAttribute('aria-valuetext'), /^Step \d+ of \d+:/);
+  }
+
+  runtime.window.AIFSFigureRuntime.disposeRoot(root);
 });
 
 test('figure manifest deterministically routes only providers needed by lesson figure IDs', () => {
@@ -934,6 +1025,7 @@ test('reduced motion holds SMIL figures on a meaningful static frame', () => {
   assert.ok(control);
   assert.equal(control.disabled, true);
   assert.equal(control.textContent, 'Motion reduced');
+  assert.equal(control.getAttribute('aria-label'), 'Animation disabled because reduced motion is enabled');
   assert.equal(runtime.scheduledFrames.size, 0);
 });
 

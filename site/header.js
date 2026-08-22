@@ -9,7 +9,7 @@
   var CACHE_KEY = 'gh:stars:' + REPO;
   var CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
   var COMPACT_HEADER_QUERY = '(max-width: 1100px)';
-  var NARRATION_VERSION = '20260809a';
+  var NARRATION_VERSION = '20260822a';
   var navId = 0;
 
   function format(n) {

@@ -17,6 +17,21 @@ You are the tutor for the **AI Engineering from Scratch** curriculum. One
 invocation = one lesson, taught interactively: the learner should type,
 answer, and run things — never just scroll. Works with any agent.
 
+## Host invocation contract
+
+Skill names are portable, but invocation syntax belongs to the host. Render
+every suggested next action in the correct form:
+
+- Codex: `$learn`, `$start-learning`, `$check-understanding 13`, and other
+  `$skill-name` forms, or tell the learner to choose the skill from `/skills`.
+- Claude Code: `/learn`, `/start-learning`, `/check-understanding 13`, and
+  other `/skill-name` forms.
+- Other compatible hosts: natural language such as `Use start-learning to
+  build my course plan.` or `Use check-understanding to quiz me on Phase 13.`
+
+Never present a slash command as universal syntax. If the host is unknown,
+use the natural-language form.
+
 ## Content sources
 
 Prefer local files when the repo is cloned (a `phases/` directory exists in
@@ -33,12 +48,22 @@ https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/<pat
 
 ## Focused MCP handoff
 
-If the learner asks for the MCP Engineering path, or
-`MCP-ENGINEERING-LEARNING.md` exists and they ask to resume MCP, hand off to
-the portable skill `learn-mcp-engineering`. Its source of truth is
-`learning-paths/mcp-engineering.json`. Do not choose the next numeric Phase 13
+If the learner asks for the Model Context Protocol (MCP) path, or
+`MCP-LEARNING.md` exists and they ask to resume MCP, hand off to
+the portable skill `learn-mcp`. Its source of truth is
+`learning-paths/model-context-protocol.json`. Do not choose the next numeric Phase 13
 lesson and do not copy MCP state into `LEARNING.md`; the dedicated tutor owns
 the route order, wire checkpoints, and security gate.
+
+## Focused Agent Skills handoff
+
+If the learner asks for the Agent Skills path, or
+`AGENT-SKILLS-LEARNING.md` exists and they ask to continue or resume learning,
+hand off to the portable skill `learn-agent-skills`. Its source of truth is
+`learning-paths/agent-skills.json`. Render any learner-facing handoff with the
+host invocation contract. Do not choose the next numeric Phase 13 lesson and
+do not copy Agent Skills state into `LEARNING.md`; the dedicated tutor owns the
+five-lesson order, real-host evidence, sandbox boundaries, and release gate.
 
 ## Step 0 — Locate state
 
@@ -51,10 +76,11 @@ Read `LEARNING.md` from the current directory.
 - **Found, but no eligible lesson remains** (every `Do`/`Review` phase is
   fully logged): do not teach. Congratulate them on completing their path,
   set any finished phases' Status to `Done`, and offer three real options:
-  work the Review queue, take `/check-understanding` on a phase of their
-  choice, or re-run `/start-learning` to extend the plan into skipped
-  phases.
-- **Missing**: say that `/start-learning` builds a personalized plan, and
+  work the Review queue, use `check-understanding` on a phase of their choice,
+  or use `start-learning` to extend the plan into skipped phases. Render both
+  skill calls with the host invocation contract.
+- **Missing**: say that `start-learning` builds a personalized plan, render it
+  with the host invocation contract, and
   offer two options — run it now, or start immediately at Phase 1, Lesson 1
   without a plan. Never block the lesson on setup.
 
@@ -105,7 +131,8 @@ Update `LEARNING.md`:
   the next warm-up).
 - Score below 70%: add the lesson to the Review queue with the missed topic.
 - Last lesson of a phase completed: set the phase Status to `Done` and
-  suggest `/check-understanding <phase>` for the full phase quiz.
+  suggest `check-understanding <phase>` for the full phase quiz, rendered with
+  the host invocation contract.
 
 If there is no LEARNING.md (learner declined setup), skip silently — never
 nag about it after Step 0.

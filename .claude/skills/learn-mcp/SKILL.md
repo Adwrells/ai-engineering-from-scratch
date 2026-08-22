@@ -1,33 +1,33 @@
 ---
-name: learn-mcp-engineering
+name: learn-mcp
 description: >
-  Focused interactive tutor for the MCP Engineering path in AI Engineering
+  Focused interactive tutor for the Model Context Protocol (MCP) path in AI Engineering
   from Scratch. Start or resume this route when a learner wants to build,
   secure, debug, verify, or operate MCP clients, servers, transports, gateways,
   registries, or conformance gates. Teaches one lesson per invocation and
-  records wire evidence in MCP-ENGINEERING-LEARNING.md.
+  records wire evidence in MCP-LEARNING.md.
 ---
 
-# Learn MCP Engineering
+# Learn Model Context Protocol (MCP)
 
-Teach the focused MCP Engineering route. One invocation covers one lesson.
+Teach the focused Model Context Protocol (MCP) route. One invocation covers one lesson.
 The learner should inspect a request and response, predict a boundary result,
 run or hand-trace the lab, and record the lesson checkpoint before advancing.
 
 ## Use the invocation syntax of the host
 
-The portable skill name is `learn-mcp-engineering`. Do not present one host's
+The portable skill name is `learn-mcp`. Do not present one host's
 syntax as a protocol rule.
 
 | Host | Start or resume |
 |---|---|
-| Codex | `$learn-mcp-engineering`, or choose `learn-mcp-engineering` from `/skills` |
-| Claude Code | `/learn-mcp-engineering` |
-| Other compatible hosts | `Use learn-mcp-engineering to start or resume the MCP Engineering path.` |
+| Codex | `$learn-mcp`, or choose `learn-mcp` from `/skills` |
+| Claude Code | `/learn-mcp` |
+| Other compatible hosts | `Use learn-mcp to start or resume the Model Context Protocol (MCP) path.` |
 
 ## Read the route before selecting a lesson
 
-The source of truth is `learning-paths/mcp-engineering.json`. Prefer local
+The source of truth is `learning-paths/model-context-protocol.json`. Prefer local
 files when this repository is available. Otherwise fetch a needed file from:
 
 ```text
@@ -53,7 +53,7 @@ Before the first executable checkpoint, determine whether:
 
 1. The lesson files are available locally.
 2. `python3 --version` succeeds.
-3. The learner can write `MCP-ENGINEERING-LEARNING.md` in the current working
+3. The learner can write `MCP-LEARNING.md` in the current working
    directory.
 4. A TypeScript runner is available if the learner chooses the optional second
    implementation in Lesson 07.
@@ -74,7 +74,7 @@ conceptual lesson must remain available without a clone.
 
 ## Locate or create progress
 
-Use `MCP-ENGINEERING-LEARNING.md` in the current working directory. Do not put
+Use `MCP-LEARNING.md` in the current working directory. Do not put
 this route in `LEARNING.md` and do not modify Agent Skills progress.
 
 If the file exists, preserve all learner notes and evidence. Resume the first
@@ -85,9 +85,9 @@ restarting the route.
 If the file does not exist, create it without a placement quiz:
 
 ```markdown
-# My MCP Engineering Path
-<!-- Managed by the learn-mcp-engineering tutor.
-     Source: learning-paths/mcp-engineering.json -->
+# My Model Context Protocol (MCP) Path
+<!-- Managed by the learn-mcp tutor.
+     Source: learning-paths/model-context-protocol.json -->
 
 ## Route
 - Started: <YYYY-MM-DD>

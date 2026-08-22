@@ -192,16 +192,8 @@ The first engineering task is classification. Decide what the artifact is before
 
 An agent skill is a directory whose entry point is `SKILL.md`. The entry file contains YAML frontmatter followed by Markdown instructions. The directory can also contain references, scripts, and assets.
 
-```mermaid
-flowchart TD
-  B[release-readiness bundle] --> S[SKILL.md]
-  B --> R[references]
-  R --> RP[release-policy.md]
-  R --> CF[changelog-format.md]
-  B --> C[scripts]
-  C --> IR[inspect_release.py]
-  B --> A[assets]
-  A --> RC[release-checklist.md]
+```figure
+skill-package-anatomy
 ```
 
 The directory, not the Markdown file alone, is the deployable unit. A copied `SKILL.md` with missing references is a broken package even if its frontmatter parses.
@@ -304,19 +296,8 @@ Review frontmatter like configuration code. Validate it, version it, and include
 
 ### The skill lifecycle
 
-```mermaid
-flowchart LR
-  D[Discover package] --> V[Validate metadata and layout]
-  V --> C[Publish catalog entry]
-  C --> S{Select?}
-  S -->|explicit user request| A[Activate]
-  S -->|implicit model match| A
-  S -->|no match| N[Leave unloaded]
-  A --> B[Load SKILL.md body]
-  B --> R[Read required resources]
-  R --> T[Request tools or run scripts]
-  T --> E[Return evidence and artifact]
-  E --> Q[Verify result]
+```figure
+skill-runtime-lifecycle
 ```
 
 Each arrow is a boundary with its own failure modes.
@@ -336,15 +317,8 @@ Collapsing these stages causes bad mental models. A discovered skill is not acti
 
 MCP answers, "Which capabilities can this application call, and what are their schemas?" A skill answers, "How should an agent approach this class of task?"
 
-```mermaid
-flowchart TB
-  U[User goal] --> K[Activated skill]
-  K --> P[Procedure and decision rules]
-  P --> M[MCP or local tool]
-  M --> O[Observation]
-  O --> P
-  P --> A[Artifact]
-  A --> V[Verification]
+```figure
+skill-tool-orthogonality
 ```
 
 The skill may name a tool, but the host owns the actual capability registry. If the tool is absent, the skill should state a fallback or fail clearly. It should never imply that naming a capability creates it.
@@ -400,13 +374,8 @@ The demo prints JSON for one valid portable skill, one host-extended skill, one 
 
 Validate cheap structural facts before deeper content rules:
 
-```mermaid
-flowchart LR
-  F[Frontmatter delimiters] --> Y[Scalar metadata]
-  Y --> N[Name and directory match]
-  N --> R[Required fields]
-  R --> X[Known extensions]
-  X --> B[Body and resource rules]
+```figure
+skill-validation-order
 ```
 
 This order prevents secondary errors from obscuring the first broken invariant.

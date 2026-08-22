@@ -339,11 +339,16 @@ p.dropcap::first-letter {
   background: transparent;
   color: var(--ink);
   cursor: pointer;
+  transition: transform var(--motion-press) var(--ease-out), border-color var(--motion-feedback) ease, color var(--motion-feedback) ease;
 }
 
 .header-menu-toggle:hover {
   border-color: var(--blueprint);
   color: var(--blueprint);
+}
+
+.header-menu-toggle:active {
+  transform: scale(0.97);
 }
 
 .header-menu-icon {
@@ -419,12 +424,16 @@ p.dropcap::first-letter {
   font-family: var(--font-mono);
   font-size: 0.95rem;
   color: var(--ink);
-  transition: border-color 0.15s, color 0.15s;
+  transition: transform var(--motion-press) var(--ease-out), border-color var(--motion-feedback) ease, color var(--motion-feedback) ease;
 }
 
 .theme-toggle:hover {
   border-color: var(--blueprint);
   color: var(--blueprint);
+}
+
+.theme-toggle:active {
+  transform: scale(0.97);
 }
 
 .btn {
@@ -440,13 +449,17 @@ p.dropcap::first-letter {
   cursor: pointer;
   display: inline-block;
   text-align: center;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: transform var(--motion-press) var(--ease-out), background-color var(--motion-feedback) ease, color var(--motion-feedback) ease, border-color var(--motion-feedback) ease;
 }
 
 .btn:hover {
   background: var(--ink);
   color: var(--bg);
   border-bottom: 1px solid var(--ink);
+}
+
+.btn:active {
+  transform: scale(0.97);
 }
 
 .btn-primary {
@@ -927,8 +940,8 @@ p.dropcap::first-letter {
 
 .fade-in {
   opacity: 0;
-  transform: translateY(12px);
-  transition: opacity 0.5s ease, transform 0.5s ease;
+  transform: translateY(8px);
+  transition: opacity var(--motion-enter) var(--ease-out), transform var(--motion-enter) var(--ease-out);
 }
 
 .fade-in.visible {
@@ -938,18 +951,17 @@ p.dropcap::first-letter {
 
 .reveal {
   transition:
-    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1) var(--stagger-delay, 0ms),
-    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1) var(--stagger-delay, 0ms);
-  will-change: opacity, transform;
+    opacity var(--motion-enter) var(--ease-out) var(--stagger-delay, 0ms),
+    transform var(--motion-enter) var(--ease-out) var(--stagger-delay, 0ms);
 }
 
 body.js-anim .reveal {
   opacity: 0;
-  transform: translateY(20px);
+  transform: translateY(8px);
 }
 
 body.js-anim .reveal--left {
-  transform: translateX(-20px);
+  transform: translateX(-8px);
 }
 
 body.js-anim .reveal.in-view {
@@ -958,7 +970,7 @@ body.js-anim .reveal.in-view {
 }
 
 .ascii-rule {
-  transition: clip-path 1.1s cubic-bezier(0.22, 1, 0.36, 1) var(--stagger-delay, 0ms);
+  transition: clip-path var(--motion-enter) var(--ease-out) var(--stagger-delay, 0ms);
 }
 
 body.js-anim .ascii-rule {
@@ -971,9 +983,9 @@ body.js-anim .ascii-rule.in-view {
 
 .toc-row {
   transition:
-    opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1) var(--stagger-delay, 0ms),
-    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1) var(--stagger-delay, 0ms),
-    background 0.15s;
+    opacity var(--motion-enter) var(--ease-out) var(--stagger-delay, 0ms),
+    transform var(--motion-enter) var(--ease-out) var(--stagger-delay, 0ms),
+    background-color var(--motion-feedback) ease;
 }
 
 body.js-anim .toc-row {
@@ -986,16 +998,13 @@ body.js-anim .toc-row.in-view {
   transform: none;
 }
 
-@keyframes title-flicker {
-  0%, 100% { opacity: 1; }
-  18% { opacity: 0.4; }
-  20% { opacity: 1; }
-  62% { opacity: 0.7; }
-  64% { opacity: 1; }
+@keyframes title-enter {
+  from { opacity: 0.82; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }
 
 .manual-title {
-  animation: title-flicker 2.4s ease-out 0.1s 1;
+  animation: title-enter var(--motion-enter) var(--ease-out) 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1015,6 +1024,39 @@ body.js-anim .toc-row.in-view {
   .modal,
   .modal-progress-bar-fill {
     transition: none !important;
+  }
+
+  .header-menu-toggle,
+  .theme-toggle,
+  .search-toggle,
+  .btn {
+    transition: background-color var(--motion-feedback) ease, border-color var(--motion-feedback) ease, color var(--motion-feedback) ease;
+  }
+
+  .header-menu-toggle:active,
+  .theme-toggle:active,
+  .search-toggle:active,
+  .btn:active {
+    transform: none;
+  }
+}
+
+@media print {
+  .reveal,
+  .fade-in,
+  .ascii-rule,
+  .toc-row {
+    opacity: 1 !important;
+    transform: none !important;
+    clip-path: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .site-header {
+    position: static;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 
@@ -1391,13 +1433,17 @@ body.js-anim .toc-row.in-view {
   align-items: center;
   justify-content: center;
   color: var(--ink-soft);
-  transition: border-color 0.15s, color 0.15s;
+  transition: transform var(--motion-press) var(--ease-out), border-color var(--motion-feedback) ease, color var(--motion-feedback) ease;
   flex-shrink: 0;
 }
 
 .search-toggle:hover {
   border-color: var(--blueprint);
   color: var(--blueprint);
+}
+
+.search-toggle:active {
+  transform: scale(0.97);
 }
 
 /* ── Palette overlay wrapper ─────────────────────────────────────────── */
@@ -1723,6 +1769,14 @@ body[data-palette-open] {
   .cp-backdrop,
   .cp-panel {
     transition: none !important;
+  }
+
+  .search-toggle {
+    transition: border-color var(--motion-feedback) ease, color var(--motion-feedback) ease;
+  }
+
+  .search-toggle:active {
+    transform: none;
   }
 }
 

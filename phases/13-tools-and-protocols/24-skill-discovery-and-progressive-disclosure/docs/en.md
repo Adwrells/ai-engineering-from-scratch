@@ -33,15 +33,8 @@ A good runtime makes discovery deterministic and disclosure intentional.
 
 Treat the filesystem as source input. Do not publish raw paths directly to the model.
 
-```mermaid
-flowchart LR
-  R[Configured roots] --> W[Enumerate immediate skill dirs]
-  W --> P[Find SKILL.md]
-  P --> V[Validate package]
-  V --> S[Attach scope and provenance]
-  S --> C[Resolve collisions]
-  C --> B[Apply catalog budget]
-  B --> O[Publish name, description, path]
+```figure
+skill-discovery-pipeline
 ```
 
 Each stage should produce structured data and structured failures. A discovery log should answer:
@@ -101,10 +94,8 @@ Choose one policy for the host. Preserve the rejected or shadowed candidates in 
 
 The Agent Skills specification describes staged loading. The key is that each level has a different purpose.
 
-```mermaid
-flowchart TB
-  L1[Level 1: catalog metadata<br/>name, description, source] -->|skill selected| L2[Level 2: SKILL.md body<br/>workflow and decision map]
-  L2 -->|branch requires detail| L3[Level 3: references, scripts, assets<br/>task-specific material]
+```figure
+skill-disclosure-levels
 ```
 
 #### Level 1: catalog metadata
@@ -164,12 +155,8 @@ This gives every reference an observable load condition. "Read `references/` for
 
 Keep the reference graph shallow. The official guidance recommends direct links from `SKILL.md` and avoiding deep chains. One hop makes reachability testable and reduces the chance that a needed constraint never enters context.
 
-```mermaid
-flowchart LR
-  S[SKILL.md] --> P[python-release.md]
-  S --> C[container-release.md]
-  S --> D[docs-release.md]
-  S --> T[report-template.md]
+```figure
+skill-reference-map
 ```
 
 ### Catalog budget and active context are different budgets
@@ -201,16 +188,8 @@ references/external-link -> /private/company-secrets
 
 Resolve the package root and candidate with filesystem semantics, reject absolute inputs, and verify that the resolved candidate remains under the resolved root. Decide whether symlinks are allowed before discovery. If allowed, check the resolved target every time.
 
-```mermaid
-flowchart LR
-  I[Requested relative path] --> A{Absolute or parent escape?}
-  A -->|yes| X[Reject]
-  A -->|no| R[Resolve against package root]
-  R --> U{Resolved path under root?}
-  U -->|no| X
-  U -->|yes| F{Expected file type?}
-  F -->|no| X
-  F -->|yes| L[Load with size limit]
+```figure
+skill-resource-containment
 ```
 
 Path containment does not establish content trust. A valid in-package reference can still contain malicious instructions. Lesson 26 handles that threat.

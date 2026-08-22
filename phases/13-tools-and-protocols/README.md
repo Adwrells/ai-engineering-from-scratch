@@ -6,7 +6,29 @@ This phase moves from function calls and tool schemas into interoperable
 protocols, Agent Skills, security, and production governance. Numeric order is
 useful for browsing. The focused routes below are the reliable learning order.
 
-## MCP Engineering path
+## Start this phase on GitHub
+
+**Prerequisites:** Phase 11 LLM completion APIs. For MCP or Agent Skills, use
+the focused route below instead of assuming numeric lesson order.
+
+**First full-phase lesson:** [The Tool Interface](01-the-tool-interface/)
+
+Run this command from the repository root:
+
+```bash
+python3 phases/13-tools-and-protocols/01-the-tool-interface/code/main.py
+```
+
+Keep the command, exit code, describe-decide-execute-observe trace, rejected
+input evidence, and one sentence explaining the turn limit.
+
+**Next action:** Continue to [Function Calling Deep Dive](02-function-calling-deep-dive/),
+or choose the Model Context Protocol (MCP) or Agent Skills route below.
+
+Browse the [full Phase 13 lesson list](../../README.md#phase-13) or the
+[cross-phase roadmap](../../ROADMAP.md).
+
+## Model Context Protocol (MCP) path
 
 The focused MCP route is 17 lessons and about 23 hours 15 minutes. It follows
 MCP `2026-07-28` from one self-describing JSON-RPC request to an operational
@@ -21,8 +43,8 @@ conformance gate.
 
 The exact order is 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 18, 17, 28,
 29, 30, 31. It is defined in
-[`learning-paths/mcp-engineering.json`](../../learning-paths/mcp-engineering.json).
-The tutor creates `MCP-ENGINEERING-LEARNING.md`, teaches one lesson per
+[`learning-paths/model-context-protocol.json`](../../learning-paths/model-context-protocol.json).
+The tutor creates `MCP-LEARNING.md`, teaches one lesson per
 invocation, and records the request, response, command, working directory, exit
 code, and redacted boundary evidence required by each checkpoint.
 
@@ -30,9 +52,9 @@ Start with the invocation supported by your host:
 
 | Host | Invocation |
 |---|---|
-| Codex | `$learn-mcp-engineering`, or choose `learn-mcp-engineering` from `/skills` |
-| Claude Code | `/learn-mcp-engineering` |
-| Other compatible hosts | `Use learn-mcp-engineering to start or resume the MCP Engineering path.` |
+| Codex | `$learn-mcp`, or choose `learn-mcp` from `/skills` |
+| Claude Code | `/learn-mcp` |
+| Other compatible hosts | `Use learn-mcp to start or resume the Model Context Protocol (MCP) path.` |
 
 ### Your first ten minutes
 

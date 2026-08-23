@@ -1,4 +1,9 @@
-"""Stateless MCP 2026-07-28 simulator for the companion docs/en.md lesson."""
+"""Certification lesson 11: stateless MCP server design simulator.
+Lesson: certifications/claude/lessons/11-mcp-server-design-and-integration/docs/en.md
+MCP: https://modelcontextprotocol.io/specification/2026-07-28
+Also follows JSON-RPC 2.0, RFC 2104 HMAC, and RFC 4648 base64url.
+Run: python3 main.py
+"""
 
 from __future__ import annotations
 
@@ -142,12 +147,14 @@ class MCPServer:
             request.get("method"), str
         )
         if "id" not in request:
-            params_are_structured = "params" not in request or isinstance(
-                request["params"], (dict, list)
-            )
-            if valid_envelope and params_are_structured:
-                return None, []
-            return self._error(None, -32600, "Invalid Request"), []
+            params = request.get("params", {})
+            if not valid_envelope or not isinstance(params, (dict, list)):
+                return self._error(None, -32600, "Invalid Request"), []
+            try:
+                self._validate_notification(request["method"], params)
+            except ValueError:
+                pass
+            return None, []
         request_id = request.get("id")
         if request_id is None or isinstance(request_id, bool) or not isinstance(
             request_id, (str, int)
@@ -173,6 +180,22 @@ class MCPServer:
             return self._error(request_id, -32601, str(exc)), []
         except Exception:
             return self._error(request_id, -32603, "Internal error"), []
+
+    @staticmethod
+    def _validate_notification(method: str, params: Any) -> None:
+        if method != "notifications/cancelled" or not isinstance(params, dict):
+            raise ValueError("unsupported or malformed notification")
+        request_id = params.get("requestId")
+        if type(request_id) not in (str, int):
+            raise ValueError("notifications/cancelled requires a requestId")
+        reason = params.get("reason")
+        if reason is not None and not isinstance(reason, str):
+            raise ValueError("notifications/cancelled reason must be a string")
+        metadata = params.get("_meta")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("notifications/cancelled _meta must be an object")
+        if set(params) - {"requestId", "reason", "_meta"}:
+            raise ValueError("notifications/cancelled contains unexpected fields")
 
     def _validate_request_metadata(self, params: Any) -> dict[str, Any]:
         if not isinstance(params, dict):
@@ -377,10 +400,20 @@ class MCPServer:
                 inputRequests=missing_responses, requestState=state
             )
 
-        roots = responses["workspace_scope"].get("roots")
-        sample_content = responses["review_sample"].get("content", {})
+        workspace_scope = responses["workspace_scope"]
+        review_sample = responses["review_sample"]
         elicitation = responses["review_goal"]
-        goal = elicitation.get("content", {}).get("goal")
+        if not all(
+            isinstance(response, dict)
+            for response in (workspace_scope, review_sample, elicitation)
+        ):
+            raise ValueError("inputResponses entries must be objects")
+        elicitation_content = elicitation.get("content", {})
+        if not isinstance(elicitation_content, dict):
+            raise ValueError("review_goal.content must be an object")
+        roots = workspace_scope.get("roots")
+        sample_content = review_sample.get("content", {})
+        goal = elicitation_content.get("goal")
         if not isinstance(roots, list) or not isinstance(sample_content, dict):
             raise ValueError("inputResponses contain invalid roots or sampling results")
         if elicitation.get("action") != "accept" or not isinstance(goal, str):

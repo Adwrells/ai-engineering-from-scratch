@@ -15,15 +15,20 @@ from main import (
     MCPClient,
     MCPServer,
     PROTOCOL_VERSION_KEY,
+    REQUEST_STATE_DISPLAY_PLACEHOLDER,
     SERVER_INFO_KEY,
+    canonicalize_demo_transcript,
     demo,
     streamable_http_profile,
 )
 
 
+TEST_STATE_SECRET = b"lesson-11-deterministic-test-state-key"
+
+
 class MCPTests(unittest.TestCase):
     def setUp(self):
-        self.server = MCPServer()
+        self.server = MCPServer(state_secret=TEST_STATE_SECRET)
         self.client = MCPClient(self.server)
 
     @staticmethod
@@ -51,7 +56,34 @@ class MCPTests(unittest.TestCase):
 
     def test_shipped_capability_snapshot_matches_demo(self):
         artifact = pathlib.Path(__file__).parents[2] / "outputs" / "mcp-capability-snapshot.json"
-        self.assertEqual(json.loads(artifact.read_text(encoding="utf-8")), demo())
+        self.assertEqual(
+            json.loads(artifact.read_text(encoding="utf-8")),
+            canonicalize_demo_transcript(demo(state_secret=TEST_STATE_SECRET)),
+        )
+
+    def test_server_requires_explicit_state_secret(self):
+        with self.assertRaisesRegex(TypeError, "state_secret"):
+            MCPServer()
+
+    def test_canonical_transcripts_hide_secret_specific_request_state(self):
+        first_raw = demo(state_secret=b"first-deterministic-state-secret")
+        second_raw = demo(state_secret=b"second-deterministic-state-secret")
+        first_state = first_raw["mrtrAcrossInstances"]["inputRequired"]["requestState"]
+        second_state = second_raw["mrtrAcrossInstances"]["inputRequired"]["requestState"]
+
+        first_canonical = canonicalize_demo_transcript(first_raw)
+        second_canonical = canonicalize_demo_transcript(second_raw)
+
+        self.assertNotEqual(first_state, second_state)
+        self.assertEqual(first_canonical, second_canonical)
+        self.assertEqual(
+            first_canonical["mrtrAcrossInstances"]["inputRequired"]["requestState"],
+            REQUEST_STATE_DISPLAY_PLACEHOLDER,
+        )
+        self.assertEqual(
+            first_raw["mrtrAcrossInstances"]["inputRequired"]["requestState"],
+            first_state,
+        )
 
     def test_discovery_is_mandatory_current_shape(self):
         result = self.client.request("server/discover")
@@ -297,8 +329,8 @@ class MCPTests(unittest.TestCase):
     def test_mrtr_retry_uses_new_id_and_can_reach_another_instance(self):
         trace = self.client.call_with_mrtr(
             {"name": "prepare_review", "arguments": {"topic": "release safety"}},
-            first_server=MCPServer(),
-            retry_server=MCPServer(),
+            first_server=MCPServer(state_secret=TEST_STATE_SECRET),
+            retry_server=MCPServer(state_secret=TEST_STATE_SECRET),
         )
         self.assertNotEqual(trace["initialRequestId"], trace["retryRequestId"])
         self.assertEqual(trace["inputRequired"]["resultType"], "input_required")

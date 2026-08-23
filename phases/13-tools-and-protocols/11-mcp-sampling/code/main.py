@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -106,7 +107,7 @@ def server_discover(params: dict[str, Any]) -> dict[str, Any]:
 def tools_list(params: dict[str, Any]) -> dict[str, Any]:
     validate_request_meta(params)
     return complete(
-        tools=sorted(TOOLS, key=lambda tool: tool["name"]),
+        tools=sorted(deepcopy(TOOLS), key=lambda tool: tool["name"]),
         ttlMs=60_000,
         cacheScope="public",
     )

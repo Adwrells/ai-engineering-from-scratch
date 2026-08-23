@@ -67,6 +67,21 @@ class SamplingMrtrTests(unittest.TestCase):
         self.assertEqual(descriptor["name"], "summarize_repo")
         self.assertEqual(descriptor["inputSchema"]["type"], "object")
 
+    def test_tools_list_returns_independent_descriptors(self) -> None:
+        request = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {"_meta": main.request_meta()},
+        }
+        first = main.dispatch(request)["result"]["tools"]
+        first[0]["inputSchema"]["properties"]["audience"]["type"] = "integer"
+        second = main.dispatch({**request, "id": 3})["result"]["tools"]
+        self.assertEqual(
+            second[0]["inputSchema"]["properties"]["audience"]["type"],
+            "string",
+        )
+
     def test_initial_call_returns_embedded_sampling_request(self) -> None:
         response = main.dispatch(tool_request())
         result = response["result"]

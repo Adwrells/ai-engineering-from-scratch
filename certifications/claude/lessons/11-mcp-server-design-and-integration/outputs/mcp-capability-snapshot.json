@@ -164,7 +164,7 @@
           }
         }
       },
-      "requestState": "eyJhcmd1bWVudHMiOnsidG9waWMiOiJyZWxlYXNlIHNhZmV0eSJ9LCJtZXRob2QiOiJ0b29scy9jYWxsIiwidG9vbCI6InByZXBhcmVfcmV2aWV3In0.3a1ca10cabe573d52dc954afefbc422a6e2b57939e34139893a1419297ca9e35",
+      "requestState": "<opaque-generated-per-run>",
       "_meta": {
         "io.modelcontextprotocol/serverInfo": {
           "name": "study-server",

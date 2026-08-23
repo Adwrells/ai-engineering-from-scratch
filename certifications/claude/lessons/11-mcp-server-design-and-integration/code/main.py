@@ -8,9 +8,11 @@ Run: python3 main.py
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import hmac
 import json
+import secrets
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -21,6 +23,7 @@ CLIENT_INFO_KEY = "io.modelcontextprotocol/clientInfo"
 CLIENT_CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
 SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
 SERVER_INFO = {"name": "study-server", "version": "2.0.0"}
+REQUEST_STATE_DISPLAY_PLACEHOLDER = "<opaque-generated-per-run>"
 
 
 class ProtocolError(Exception):
@@ -103,7 +106,7 @@ class RequestStateSigner:
 
 
 class MCPServer:
-    def __init__(self, *, state_secret: bytes = b"lesson-11-shared-state-key") -> None:
+    def __init__(self, *, state_secret: bytes) -> None:
         self.state_signer = RequestStateSigner(state_secret)
         self.tools = {
             "add": Capability(
@@ -604,9 +607,23 @@ def streamable_http_profile() -> dict[str, Any]:
     }
 
 
-def demo() -> dict[str, Any]:
-    first_instance = MCPServer()
-    retry_instance = MCPServer()
+def canonicalize_demo_transcript(transcript: dict[str, Any]) -> dict[str, Any]:
+    canonical = copy.deepcopy(transcript)
+    mrtr = canonical.get("mrtrAcrossInstances")
+    if not isinstance(mrtr, dict):
+        raise ValueError("demo transcript is missing mrtrAcrossInstances")
+    input_required = mrtr.get("inputRequired")
+    if not isinstance(input_required, dict) or not isinstance(
+        input_required.get("requestState"), str
+    ):
+        raise ValueError("demo transcript is missing inputRequired.requestState")
+    input_required["requestState"] = REQUEST_STATE_DISPLAY_PLACEHOLDER
+    return canonical
+
+
+def demo(*, state_secret: bytes) -> dict[str, Any]:
+    first_instance = MCPServer(state_secret=state_secret)
+    retry_instance = MCPServer(state_secret=state_secret)
     client = MCPClient(first_instance)
     discover = client.request("server/discover")
     tools = client.request("tools/list")
@@ -640,4 +657,5 @@ def demo() -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    print(json.dumps(demo(), indent=2))
+    transcript = demo(state_secret=secrets.token_bytes(32))
+    print(json.dumps(canonicalize_demo_transcript(transcript), indent=2))

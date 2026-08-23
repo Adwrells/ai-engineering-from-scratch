@@ -416,6 +416,7 @@ class ProductionAuthTests(unittest.TestCase):
                 code_verifier="wrong-verifier",
                 resource=MCP_RESOURCE,
             )
+        self.assertIn(response["code"], auth.authorization_codes)
 
     def test_authorization_requires_s256_challenge_method(self):
         auth = ready_authorization_server()

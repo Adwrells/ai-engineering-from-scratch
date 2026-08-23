@@ -875,7 +875,7 @@ test('lesson reader keeps learning-path context and renders a copyable full-dept
   assert.match(lessonHtml, /git rev-parse --show-toplevel/);
   assert.match(lessonHtml, /lessonQuizCorrectAnswers\[qid\] = q\.correct/);
   assert.doesNotMatch(lessonHtml, /data-correct=/);
-  assert.match(lessonHtml, /\$check-understanding/);
+  assert.match(lessonHtml, /In Codex use <code>check-understanding /);
   assert.match(lessonHtml, /\/check-understanding/);
 });
 

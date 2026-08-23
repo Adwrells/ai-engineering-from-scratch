@@ -30,7 +30,7 @@ Start with the invocation supported by your host:
 
 | Host | Invocation |
 |---|---|
-| Codex | `$learn-mcp-engineering`, or choose `learn-mcp-engineering` from `/skills` |
+| Codex | `learn-mcp-engineering`, or choose it from `/skills` |
 | Claude Code | `/learn-mcp-engineering` |
 | Other compatible hosts | `Use learn-mcp-engineering to start or resume the MCP Engineering path.` |
 
@@ -82,7 +82,7 @@ Start with the invocation supported by your host:
 
 | Host | Invocation |
 |---|---|
-| Codex | `$learn-agent-skills`, or choose `learn-agent-skills` from `/skills` |
+| Codex | `learn-agent-skills`, or choose it from `/skills` |
 | Claude Code | `/learn-agent-skills` |
 | Other compatible hosts | `Use learn-agent-skills to start or resume the Agent Skills Engineering path.` |
 

@@ -72,7 +72,7 @@ Invocation syntax belongs to the host, not to the portable `SKILL.md` format:
 
 | Host | Start the course | Start MCP Engineering | Start Agent Skills | Run a phase quiz |
 |---|---|---|---|---|
-| Codex | `$start-learning`, or choose it from `/skills` | `$learn-mcp-engineering`, or choose it from `/skills` | `$learn-agent-skills`, or choose it from `/skills` | `$check-understanding 13`, or choose it from `/skills` |
+| Codex | `start-learning`, or choose it from `/skills` | `learn-mcp-engineering`, or choose it from `/skills` | `learn-agent-skills`, or choose it from `/skills` | `check-understanding 13`, or choose it from `/skills` |
 | Claude Code | `/start-learning` | `/learn-mcp-engineering` | `/learn-agent-skills` | `/check-understanding 13` |
 | Other compatible hosts | `Use start-learning to begin the course.` | `Use learn-mcp-engineering to start the MCP Engineering path.` | `Use learn-agent-skills to start the Agent Skills Engineering path.` | `Use check-understanding to quiz me on Phase 13.` |
 
@@ -80,8 +80,8 @@ A ten-question placement quiz maps what you already know to a starting phase and
 saves a personalized study plan to `LEARNING.md`. From there, `/learn` teaches
 one lesson per session — concept, math, code, quiz — streaming lessons straight
 from this repo, and the `course-guide` skill jumps you to the exact lesson that
-covers anything you are stuck on. In Codex, invoke these skills with `$learn`
-and `$course-guide`; in Claude Code, use `/learn` and `/course-guide`; in other
+covers anything you are stuck on. In Codex, invoke these skills with `learn`
+and `course-guide`; in Claude Code, use `/learn` and `/course-guide`; in other
 compatible hosts, ask to use the skill by name.
 
 Only want MCP Engineering? Use the MCP invocation for your host. It creates

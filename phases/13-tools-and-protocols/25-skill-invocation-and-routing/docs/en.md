@@ -90,10 +90,10 @@ An explicit invocation supplies identity directly:
 or:
 
 ```text
-$release-readiness check v2.4.0 without publishing
+release-readiness check v2.4.0 without publishing
 ```
 
-Current Codex interfaces document `/skills` for selection and `$skill-name` for explicit invocation. Claude Code documents `/skill-name` and host-specific argument expansion. The exact syntax, menu visibility, quoting rules, and variable expansion belong to the host.
+Current Codex interfaces document `/skills` for selection and plain skill names in requests for explicit invocation. Claude Code documents `/skill-name` and host-specific argument expansion. The exact syntax, menu visibility, quoting rules, and variable expansion belong to the host.
 
 An explicit request still passes policy. Naming a skill should not bypass missing permissions, workspace constraints, approval gates, or runtime isolation.
 

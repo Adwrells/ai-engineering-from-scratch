@@ -34,7 +34,7 @@
     }
   ],
   "invocation": {
-    "codex": "$learn-mcp-engineering, or choose learn-mcp-engineering from /skills",
+    "codex": "learn-mcp-engineering, or choose it from /skills",
     "claudeCode": "/learn-mcp-engineering",
     "portableFallback": "Use learn-mcp-engineering to start or resume the MCP Engineering path."
   },

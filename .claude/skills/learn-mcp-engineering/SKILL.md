@@ -21,7 +21,7 @@ syntax as a protocol rule.
 
 | Host | Start or resume |
 |---|---|
-| Codex | `$learn-mcp-engineering`, or choose `learn-mcp-engineering` from `/skills` |
+| Codex | `learn-mcp-engineering`, or choose it from `/skills` |
 | Claude Code | `/learn-mcp-engineering` |
 | Other compatible hosts | `Use learn-mcp-engineering to start or resume the MCP Engineering path.` |
 

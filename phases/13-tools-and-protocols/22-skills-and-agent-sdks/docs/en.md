@@ -117,7 +117,7 @@ directory, use the syntax supported by that host:
 
 | Host | Explicit invocation |
 |---|---|
-| Codex | `$skill-contract-reviewer`, or choose it from `/skills`, then provide the review request |
+| Codex | `skill-contract-reviewer`, or choose it from `/skills`, then provide the review request |
 | Claude Code | `/skill-contract-reviewer` followed by the review request |
 | Portable fallback | `Use skill-contract-reviewer to review the target package.` |
 

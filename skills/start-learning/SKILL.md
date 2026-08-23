@@ -49,7 +49,7 @@ If the learner explicitly wants MCP Engineering rather than the full course,
 do not run placement and do not create `LEARNING.md`. Route to the portable
 skill `learn-mcp-engineering`, whose source is
 `learning-paths/mcp-engineering.json` and whose state file is
-`MCP-ENGINEERING-LEARNING.md`. Use `$learn-mcp-engineering` in Codex,
+`MCP-ENGINEERING-LEARNING.md`. Use `learn-mcp-engineering` in Codex,
 `/learn-mcp-engineering` in Claude Code, or ask another compatible host to use
 `learn-mcp-engineering`. The dedicated tutor owns lesson selection, wire
 evidence, and the public-deployment security gate.
@@ -60,7 +60,7 @@ If the learner explicitly wants Agent Skills instead of the full course, or
 `AGENT-SKILLS-LEARNING.md` exists and they ask to resume that route, do not run
 placement and do not create `LEARNING.md`. Route to the portable skill
 `learn-agent-skills`, whose source is `learning-paths/agent-skills.json` and
-whose state file is `AGENT-SKILLS-LEARNING.md`. Use `$learn-agent-skills` in
+whose state file is `AGENT-SKILLS-LEARNING.md`. Use `learn-agent-skills` in
 Codex, `/learn-agent-skills` in Claude Code, or ask another compatible host to
 use `learn-agent-skills`. The dedicated tutor owns lesson selection, real-host
 evidence, and the poisoning knowledge preflight.

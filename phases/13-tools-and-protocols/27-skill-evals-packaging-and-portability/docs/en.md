@@ -537,7 +537,7 @@ Use the explicit syntax supported by the first host:
 
 | Host | Explicit invocation |
 |---|---|
-| Codex | `$skill-release-gate`, or choose it from `/skills`, then provide the evaluation request |
+| Codex | `skill-release-gate`, or choose it from `/skills`, then provide the evaluation request |
 | Claude Code | `/skill-release-gate` followed by the evaluation request |
 | Portable fallback | `Use skill-release-gate to evaluate the target bundle.` |
 

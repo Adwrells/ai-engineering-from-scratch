@@ -25,19 +25,23 @@ text and wait for the reply.
 
 ## Resume routing across course modes
 
-Before resolving an unnamed "resume" or "continue" request, inspect all four
-supported state files in the current directory:
+Before generic onboarding, resolve every "resume" or "continue" request
+against these four supported state files and their installed route owners:
 
 - `LEARNING.md` belongs to `learn` for the full curriculum.
 - `MCP-ENGINEERING-LEARNING.md` belongs to `learn-mcp-engineering`.
 - `AGENT-SKILLS-LEARNING.md` belongs to `learn-agent-skills`.
 - `CLAUDE-CERTIFICATION.md` belongs to `claude-certification`.
 
-If the learner names a route, use its owner even when other state files exist.
-If the request is unnamed and exactly one state file exists, resume its owner.
-If two or more exist, list the available routes and ask which one to resume
-before running placement or changing any state. Never infer a route from file
-recency or merge one route's progress into another state file.
+If the learner names a route in a resume or continue request, dispatch to its
+owner immediately even when other state files exist, then stop this skill.
+
+For an unnamed resume or continue request, collect the owners whose state files
+exist. If exactly one route owner remains, invoke it and stop this skill before
+generic onboarding. If two or more route owners remain, list the available
+routes and ask which route to resume before running placement or changing any
+state. If none exist, continue with generic onboarding. Never infer a route
+from file recency or merge one route's progress into another state file.
 
 ## Focused MCP handoff
 

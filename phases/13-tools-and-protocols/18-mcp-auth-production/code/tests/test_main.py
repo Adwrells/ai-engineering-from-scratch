@@ -193,6 +193,87 @@ class ProductionAuthTests(unittest.TestCase):
         self.assertEqual(response["status"], 400)
         self.assertEqual(response["body"]["error"], "invalid_redirect_uri")
 
+    def test_native_redirect_policy_rejects_registered_and_generic_schemes(self):
+        auth = ready_authorization_server()
+        invalid_redirects = (
+            "javascript:alert(1)",
+            "data:text/plain,callback",
+            "ftp://app.example.com/callback",
+            "urn:ietf:wg:oauth:2.0:oob",
+        )
+        for index, redirect_uri in enumerate(invalid_redirects):
+            with self.subTest(
+                enrollment="cimd_omitted_application_type",
+                redirect_uri=redirect_uri,
+            ):
+                client = cimd_client(auth)
+                client.client_metadata["redirect_uris"] = [redirect_uri]
+                with self.assertRaisesRegex(ValueError, "domain-based private-use"):
+                    client.enroll()
+
+            with self.subTest(enrollment="cimd", redirect_uri=redirect_uri):
+                client = cimd_client(auth)
+                client.client_metadata.update(
+                    {
+                        "application_type": "native",
+                        "redirect_uris": [redirect_uri],
+                    }
+                )
+                with self.assertRaisesRegex(ValueError, "domain-based private-use"):
+                    client.enroll()
+
+            with self.subTest(enrollment="dcr", redirect_uri=redirect_uri):
+                response = auth.register_client(
+                    {
+                        "application_type": "native",
+                        "redirect_uris": [redirect_uri],
+                    }
+                )
+                self.assertEqual(400, response["status"])
+                self.assertEqual("invalid_redirect_uri", response["body"]["error"])
+
+            with self.subTest(enrollment="pre_registered", redirect_uri=redirect_uri):
+                client_id = f"invalid-scheme-client-{index}"
+                with self.assertRaisesRegex(ValueError, "domain-based private-use"):
+                    auth.pre_register_client(
+                        client_id,
+                        redirect_uris=[redirect_uri],
+                        client_name="Invalid native client",
+                    )
+                self.assertNotIn(client_id, auth.clients)
+
+    def test_native_redirect_policy_accepts_domain_based_private_use_scheme(self):
+        auth = ready_authorization_server()
+        redirect_uri = "com.example.app:/oauth2redirect"
+
+        client = cimd_client(auth)
+        client.client_metadata.update(
+            {
+                "application_type": "native",
+                "redirect_uris": [redirect_uri],
+            }
+        )
+        cimd_client_id = client.enroll()
+        self.assertEqual([redirect_uri], auth.clients[cimd_client_id]["redirect_uris"])
+
+        response = auth.register_client(
+            {
+                "application_type": "native",
+                "redirect_uris": [redirect_uri],
+            }
+        )
+        self.assertEqual(201, response["status"])
+
+        pre_registered_id = auth.pre_register_client(
+            "private-use-client",
+            redirect_uris=[redirect_uri],
+            client_name="Private-use native client",
+        )
+        self.assertEqual(
+            [redirect_uri],
+            auth.clients[pre_registered_id]["redirect_uris"],
+        )
+
     def test_dcr_fallback_records_native_application_type(self):
         auth = ready_authorization_server()
         client = Client(name="Fallback client", auth_server=auth)
@@ -215,6 +296,37 @@ class ProductionAuthTests(unittest.TestCase):
         )
         self.assertEqual(client_id, client.enroll())
         self.assertEqual("pre_registered", auth.clients[client_id]["enrollment"])
+
+    def test_pre_registered_redirects_follow_runtime_registration_policy(self):
+        auth = ready_authorization_server()
+        invalid_redirects = (
+            ("native", "http://app.example.com/callback"),
+            ("native", "/callback"),
+            ("web", "http://127.0.0.1:7333/callback"),
+            ("web", "https://app.example.com/callback#fragment"),
+        )
+        for index, (application_type, redirect_uri) in enumerate(invalid_redirects):
+            client_id = f"invalid-pre-client-{index}"
+            with self.subTest(
+                application_type=application_type,
+                redirect_uri=redirect_uri,
+            ):
+                with self.assertRaisesRegex(ValueError, "redirect URI"):
+                    auth.pre_register_client(
+                        client_id,
+                        redirect_uris=[redirect_uri],
+                        client_name="Pre-registered client",
+                        application_type=application_type,
+                    )
+                self.assertNotIn(client_id, auth.clients)
+
+        client_id = auth.pre_register_client(
+            "valid-web-client",
+            redirect_uris=["https://app.example.com/callback"],
+            client_name="Pre-registered web client",
+            application_type="web",
+        )
+        self.assertEqual("web", auth.clients[client_id]["application_type"])
 
     def test_protected_resource_metadata_inserts_well_known_before_resource_path(self):
         self.assertEqual(

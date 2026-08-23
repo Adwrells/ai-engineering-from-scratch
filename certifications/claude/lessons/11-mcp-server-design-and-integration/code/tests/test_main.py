@@ -79,6 +79,37 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(response["error"]["code"], -32602)
         self.assertIn("_meta", response["error"]["message"])
 
+    def test_invalid_request_id_is_not_reflected_by_envelope_errors(self):
+        for request_id in (None, True, 1.5, [], {}):
+            with self.subTest(request_id=request_id):
+                request = self.wire_request("tools/list", request_id=request_id)
+                request["jsonrpc"] = "1.0"
+                response, notifications = self.server.exchange(request)
+                self.assertEqual(response["id"], None)
+                self.assertEqual(response["error"]["code"], -32600)
+                self.assertEqual(notifications, [])
+
+    def test_structurally_valid_notifications_emit_no_json_rpc_response(self):
+        notification = self.wire_request("tools/list")
+        notification.pop("id")
+
+        response, notifications = self.server.exchange(notification)
+
+        self.assertIsNone(response)
+        self.assertEqual(notifications, [])
+
+    def test_malformed_no_id_objects_return_invalid_request(self):
+        malformed_requests = (
+            {"jsonrpc": "1.0", "method": 7, "params": {}},
+            {"jsonrpc": "2.0", "method": "tools/list", "params": 7},
+        )
+        for request in malformed_requests:
+            with self.subTest(request=request):
+                response, notifications = self.server.exchange(request)
+                self.assertEqual(response["id"], None)
+                self.assertEqual(response["error"]["code"], -32600)
+                self.assertEqual(notifications, [])
+
     def test_unsupported_version_uses_exact_mcp_error_data(self):
         response = self.server.handle(
             self.wire_request("tools/list", version="2025-11-25")

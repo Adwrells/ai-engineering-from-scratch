@@ -56,7 +56,7 @@ refresher outside the route.
 
 ## How to route
 
-1. **Interpret the ask**, which arrives in one of five shapes:
+1. **Interpret the ask**, which arrives in one of six shapes:
    - *Topic* ("attention", "how do diffusion models work") → find the
      lessons that teach it.
    - *Struggle* ("my agent loops forever", "loss goes to NaN") → find the

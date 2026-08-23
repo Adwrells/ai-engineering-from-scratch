@@ -341,7 +341,7 @@ class SkillArtifactBundleTest(unittest.TestCase):
 
             self.assertFalse(target.exists())
 
-    def test_installer_revalidates_a_staged_bundle_after_source_swap(self) -> None:
+    def test_installer_rejects_bundle_file_symlink_swap_at_open_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             outputs = self.make_outputs(root)
@@ -365,17 +365,21 @@ class SkillArtifactBundleTest(unittest.TestCase):
             ):
                 artifacts = list(install_skills.discover_artifacts())
                 plan = install_skills.build_plan(artifacts, target, "skills", False)
-                real_copytree = install_skills.shutil.copytree
+                real_open = install_skills._open_bundle_file
+                swapped = False
 
-                def swap_then_copy(source, destination, *args, **kwargs):
-                    policy.unlink()
-                    policy.symlink_to(outside)
-                    return real_copytree(source, destination, *args, **kwargs)
+                def swap_then_open(directory_fd, name, expected, display_path):
+                    nonlocal swapped
+                    if not swapped and display_path == policy:
+                        swapped = True
+                        policy.unlink()
+                        policy.symlink_to(outside)
+                    return real_open(directory_fd, name, expected, display_path)
 
                 with patch.object(
-                    install_skills.shutil,
-                    "copytree",
-                    side_effect=swap_then_copy,
+                    install_skills,
+                    "_open_bundle_file",
+                    side_effect=swap_then_open,
                 ):
                     with self.assertRaisesRegex(
                         install_skills.UnsafeBundleError,
@@ -385,6 +389,111 @@ class SkillArtifactBundleTest(unittest.TestCase):
 
             self.assertFalse((target / "release-gate").exists())
             self.assertEqual(list(target.iterdir()), [])
+            self.assertNotEqual(policy.read_bytes(), b"approved policy\n")
+
+    def test_installer_rejects_flat_file_symlink_swap_at_open_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outputs = self.make_outputs(root)
+            source = outputs / "skill-flat-reviewer.md"
+            write_markdown(
+                source,
+                name="flat-reviewer",
+                description="Review a flat artifact.",
+                version="1.0.0",
+            )
+            outside = root / "private.md"
+            outside.write_text("must not be installed\n", encoding="utf-8")
+            target = root / "installed"
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ):
+                artifacts = list(install_skills.discover_artifacts())
+                plan = install_skills.build_plan(artifacts, target, "skills", False)
+                real_open = install_skills._open_flat_artifact
+
+                def swap_then_open(source_path, expected):
+                    source_path.unlink()
+                    source_path.symlink_to(outside)
+                    return real_open(source_path, expected)
+
+                with patch.object(
+                    install_skills,
+                    "_open_flat_artifact",
+                    side_effect=swap_then_open,
+                ):
+                    with self.assertRaisesRegex(
+                        install_skills.UnsafeArtifactError,
+                        "regular file",
+                    ):
+                        install_skills.apply_plan(plan)
+
+            self.assertFalse((target / "flat-reviewer/SKILL.md").exists())
+            self.assertEqual([path for path in target.rglob("*") if path.is_file()], [])
+
+    def test_forced_flat_install_replaces_destination_symlink_not_its_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outputs = self.make_outputs(root)
+            source = outputs / "skill-flat-reviewer.md"
+            write_markdown(
+                source,
+                name="flat-reviewer",
+                description="Review a flat artifact.",
+                version="1.0.0",
+            )
+            target = root / "installed"
+            target.mkdir()
+            victim = root / "outside.md"
+            victim.write_text("outside stays unchanged\n", encoding="utf-8")
+            destination = target / "flat-reviewer.md"
+            destination.symlink_to(victim)
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ):
+                artifacts = list(install_skills.discover_artifacts())
+                plan = install_skills.build_plan(artifacts, target, "flat", True)
+                install_skills.apply_plan(plan, force=True)
+
+            self.assertEqual(victim.read_text(), "outside stays unchanged\n")
+            self.assertFalse(destination.is_symlink())
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+
+    def test_installer_rejects_symlinked_layout_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outputs = self.make_outputs(root)
+            source = outputs / "skill-flat-reviewer.md"
+            write_markdown(
+                source,
+                name="flat-reviewer",
+                description="Review a flat artifact.",
+                version="1.0.0",
+            )
+            target = root / "installed"
+            target.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            victim = outside / "SKILL.md"
+            victim.write_text("outside stays unchanged\n", encoding="utf-8")
+            (target / "flat-reviewer").symlink_to(
+                outside, target_is_directory=True
+            )
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ):
+                artifacts = list(install_skills.discover_artifacts())
+                plan = install_skills.build_plan(artifacts, target, "skills", True)
+                with self.assertRaisesRegex(
+                    install_skills.UnsafeArtifactError,
+                    "destination parent",
+                ):
+                    install_skills.apply_plan(plan, force=True)
+
+            self.assertEqual(victim.read_text(), "outside stays unchanged\n")
 
     def test_installer_rejects_a_bundle_reached_through_an_escaping_parent_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -545,6 +654,28 @@ class SkillArtifactBundleTest(unittest.TestCase):
                     list(install_skills.discover_artifacts())
 
             parse_artifact.assert_not_called()
+
+    def test_discovery_ignores_unrecognized_symlinked_file_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outputs = self.make_outputs(root)
+            bundle = outputs / "release-gate"
+            write_markdown(
+                bundle / "SKILL.md",
+                name="release-gate",
+                description="Gate a release.",
+                version="2.1.0",
+            )
+            outside = root / "notes.md"
+            outside.write_text("not an artifact\n", encoding="utf-8")
+            (outputs / "notes.md").symlink_to(outside)
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ):
+                artifacts = list(install_skills.discover_artifacts())
+
+            self.assertEqual([artifact.name for artifact in artifacts], ["release-gate"])
 
     def test_cli_reports_an_unsafe_bundle_without_a_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -871,6 +1002,40 @@ class SkillArtifactBundleTest(unittest.TestCase):
                 manifest["artifacts"][0]["files"],
                 ["SKILL.md", "evals/cases.json"],
             )
+
+    def test_manifest_atomically_replaces_symlink_without_touching_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "installed"
+            target.mkdir()
+            victim = root / "outside.json"
+            victim.write_text('{"protected": true}\n', encoding="utf-8")
+            manifest_path = target / "manifest.json"
+            manifest_path.symlink_to(victim)
+
+            written = install_skills.write_manifest(target, [], "skills")
+
+            self.assertEqual(victim.read_text(), '{"protected": true}\n')
+            self.assertFalse(written.is_symlink())
+            self.assertEqual(json.loads(written.read_text())["schema_version"], 1)
+
+    def test_manifest_rejects_symlinked_target_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outside = root / "outside"
+            outside.mkdir()
+            victim = outside / "manifest.json"
+            victim.write_text('{"protected": true}\n', encoding="utf-8")
+            target = root / "installed"
+            target.symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaisesRegex(
+                install_skills.UnsafeArtifactError,
+                "installation target",
+            ):
+                install_skills.write_manifest(target, [], "skills")
+
+            self.assertEqual(victim.read_text(), '{"protected": true}\n')
 
 
 if __name__ == "__main__":

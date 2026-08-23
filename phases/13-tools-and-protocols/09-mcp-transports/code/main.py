@@ -410,6 +410,8 @@ class Handler(BaseHTTPRequestHandler):
             raw_length = self.headers.get("Content-Length")
             if raw_length is None:
                 raise ValueError("Content-Length is required")
+            if not raw_length.isascii() or not raw_length.isdigit():
+                raise ValueError("Content-Length must contain ASCII decimal digits")
             length = int(raw_length)
             if not 1 <= length <= MAX_REQUEST_BYTES:
                 raise ValueError(

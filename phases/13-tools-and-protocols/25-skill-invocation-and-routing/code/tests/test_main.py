@@ -6,6 +6,7 @@ import sys
 import unittest
 import argparse
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -195,11 +196,37 @@ class InvocationTests(unittest.TestCase):
         self.assertFalse(decision.activated)
 
     def test_unknown_actor_does_not_inherit_harness_authority(self) -> None:
-        allowed, reason = CorePolicyAdapter(
+        adapter = CorePolicyAdapter(
             InvocationPolicy(harness_allowlist=("incident-triage",))
-        ).allows(SKILLS[0], SimpleNamespace(value="future"))
-        self.assertFalse(allowed)
-        self.assertIn("unknown actor", reason)
+        )
+        for actor in (SimpleNamespace(value="future"), "future", None, object()):
+            with self.subTest(actor=actor):
+                allowed, reason = adapter.allows(SKILLS[0], actor)
+                self.assertFalse(allowed)
+                self.assertIn("unknown actor", reason)
+
+    def test_unknown_actor_routes_to_a_serializable_deny_decision(self) -> None:
+        adapter = CorePolicyAdapter(
+            InvocationPolicy(harness_allowlist=("incident-triage",))
+        )
+        cases = (
+            (SimpleNamespace(value="future"), "future"),
+            ("future", "future"),
+            (None, "unknown"),
+            (object(), "object"),
+        )
+        for actor, expected in cases:
+            with self.subTest(actor=expected):
+                decision = route_request(
+                    SKILLS,
+                    InvocationRequest(actor, "", "incident-triage"),
+                    adapter,
+                )
+                payload = decision.to_dict()
+                self.assertFalse(decision.activated)
+                self.assertEqual(decision.mode, "unsupported-actor")
+                self.assertEqual(payload["actor"], expected)
+                self.assertEqual(json.loads(json.dumps(payload)), payload)
 
     def test_policy_rejects_invalid_threshold_and_boolean_types(self) -> None:
         with self.assertRaises(ValueError):

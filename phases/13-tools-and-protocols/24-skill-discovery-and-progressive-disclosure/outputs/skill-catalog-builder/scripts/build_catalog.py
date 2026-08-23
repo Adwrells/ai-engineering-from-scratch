@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a read-only JSON skill catalog from ordered NAME=PATH scopes."""
+"""Build a skill catalog from NAME=PATH scopes, highest precedence first."""
 
 from __future__ import annotations
 
@@ -88,8 +88,12 @@ def parse_scope(value: str) -> tuple[str, Path]:
 
 
 def shorten(value: str, limit: int) -> str:
+    if limit < 1:
+        return ""
     if len(value) <= limit:
         return value
+    if limit == 1:
+        return "…"
     return value[: limit - 1].rstrip() + "…"
 
 
@@ -208,7 +212,13 @@ def build(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("scopes", nargs="+", type=parse_scope, metavar="NAME=PATH")
+    parser.add_argument(
+        "scopes",
+        nargs="+",
+        type=parse_scope,
+        metavar="NAME=PATH",
+        help="scope roots in precedence order, highest precedence first",
+    )
     parser.add_argument("--max-entries", type=int, default=40)
     parser.add_argument("--max-description-chars", type=int, default=240)
     parser.add_argument("--max-catalog-chars", type=int, default=8000)

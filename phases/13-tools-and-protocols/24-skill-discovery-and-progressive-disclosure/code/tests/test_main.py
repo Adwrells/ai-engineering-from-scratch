@@ -17,7 +17,7 @@ from main import (
     CatalogBudget,
     CollisionError,
     DiscoveryError,
-    ReferenceError,
+    ReferencePathError,
     Scope,
     build_catalog,
     discover_scope,
@@ -239,13 +239,13 @@ Body
     def test_rejects_traversal_reference(self) -> None:
         root = self.base / "scope"
         write_skill(root, "reporter")
-        with self.assertRaises(ReferenceError):
+        with self.assertRaises(ReferencePathError):
             validate_reference(root / "reporter", "../secret.md")
 
     def test_rejects_deep_reference_chain(self) -> None:
         root = self.base / "scope"
         write_skill(root, "reporter")
-        with self.assertRaises(ReferenceError):
+        with self.assertRaises(ReferencePathError):
             validate_reference(root / "reporter", "references/archive/format.md")
 
     def test_rejects_internal_symlink_reference(self) -> None:
@@ -253,7 +253,7 @@ Body
         write_skill(root, "reporter")
         link = root / "reporter" / "references" / "linked.md"
         link.symlink_to(link.parent / "format.md")
-        with self.assertRaisesRegex(ReferenceError, "symlinks"):
+        with self.assertRaisesRegex(ReferencePathError, "symlinks"):
             validate_reference(root / "reporter", "references/linked.md")
 
     def test_reference_load_obeys_size_budget(self) -> None:
@@ -261,7 +261,7 @@ Body
         write_skill(root, "reporter")
         candidates = discover_scope(Scope("project", root))
         catalog = build_catalog(candidates, ("project",), CatalogBudget())
-        with self.assertRaises(ReferenceError):
+        with self.assertRaises(ReferencePathError):
             load_reference(catalog.entries[0], "references/format.md", max_chars=3)
 
     def test_bundled_catalog_reports_equal_precedence_duplicate(self) -> None:
@@ -284,6 +284,23 @@ Body
         result = module.build([("project", first), ("project", second)], 40)
         self.assertFalse(result["valid"])
         self.assertIn("equal-precedence duplicate", result["errors"][0])
+
+    def test_bundled_catalog_shorten_handles_boundary_limits(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[2]
+            / "outputs"
+            / "skill-catalog-builder"
+            / "scripts"
+            / "build_catalog.py"
+        )
+        spec = importlib.util.spec_from_file_location("bundled_catalog_shorten", script_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(module.shorten("catalog", -1), "")
+        self.assertEqual(module.shorten("catalog", 0), "")
+        self.assertEqual(module.shorten("catalog", 1), "…")
 
     def test_bundled_catalog_rejects_malformed_top_level_frontmatter(self) -> None:
         script_path = (

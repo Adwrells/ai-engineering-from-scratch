@@ -78,7 +78,7 @@ class CollisionError(ValueError):
     pass
 
 
-class ReferenceError(ValueError):
+class ReferencePathError(ValueError):
     pass
 
 
@@ -301,23 +301,23 @@ def load_skill_body(
 def validate_reference(skill_directory: Path, reference: str) -> Path:
     """Allow a direct file or one subdirectory, never traversal or deep chains."""
     if "\\" in reference:
-        raise ReferenceError("references must use portable forward slashes")
+        raise ReferencePathError("references must use portable forward slashes")
     relative = PurePosixPath(reference)
     if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
-        raise ReferenceError("reference must be a clean relative path")
+        raise ReferencePathError("reference must be a clean relative path")
     if len(relative.parts) > 2:
-        raise ReferenceError("reference may be at most one directory deep")
+        raise ReferencePathError("reference may be at most one directory deep")
     root = skill_directory.resolve()
     unresolved = root
     for part in relative.parts:
         unresolved = unresolved / part
         if unresolved.is_symlink():
-            raise ReferenceError("reference path cannot contain symlinks")
+            raise ReferencePathError("reference path cannot contain symlinks")
     target = unresolved.resolve()
     if target == root or root not in target.parents:
-        raise ReferenceError("reference escapes the skill directory")
+        raise ReferencePathError("reference escapes the skill directory")
     if not target.is_file():
-        raise ReferenceError("reference must resolve to a regular file")
+        raise ReferencePathError("reference must resolve to a regular file")
     return target
 
 
@@ -329,7 +329,7 @@ def load_reference(
     target = validate_reference(Path(entry.directory), reference)
     content = target.read_text(encoding="utf-8")
     if len(content) > max_chars:
-        raise ReferenceError(f"reference exceeds {max_chars} characters")
+        raise ReferencePathError(f"reference exceeds {max_chars} characters")
     return content
 
 

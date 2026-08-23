@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -106,6 +108,198 @@ class ScopeAndElicitationTests(unittest.TestCase):
         self.assertFalse(response["result"]["structuredContent"]["deleted"])
         self.assertIn("note-14", server.notes)
 
+    def test_decline_is_terminal_for_the_confirmation_state(self) -> None:
+        first = self.server.dispatch(main.tool_request(1))
+        state = first["result"]["requestState"]
+        declined = main.tool_request(2)
+        declined["params"].update(
+            {
+                "inputResponses": {
+                    "delete_choice": {"action": "decline", "content": {}}
+                },
+                "requestState": state,
+            }
+        )
+        self.assertFalse(
+            self.server.dispatch(declined)["result"]["structuredContent"]["deleted"]
+        )
+
+        accepted = main.tool_request(3)
+        accepted["params"].update(
+            {
+                "inputResponses": {
+                    "delete_choice": {
+                        "action": "accept",
+                        "content": {"note_id": "note-14", "confirm": True},
+                    }
+                },
+                "requestState": state,
+            }
+        )
+        replay = self.server.dispatch(accepted)
+        self.assertEqual(replay["error"]["message"], "requestState was already consumed")
+        self.assertIn("note-14", self.server.notes)
+
+    def test_successful_confirmation_state_cannot_be_replayed(self) -> None:
+        first = self.server.dispatch(main.tool_request(1))
+        state = first["result"]["requestState"]
+        retry = main.tool_request(2)
+        retry["params"].update(
+            {
+                "inputResponses": {
+                    "delete_choice": {
+                        "action": "accept",
+                        "content": {"note_id": "note-14", "confirm": True},
+                    }
+                },
+                "requestState": state,
+            }
+        )
+        accepted = self.server.dispatch(retry)
+        self.assertTrue(accepted["result"]["structuredContent"]["deleted"])
+
+        replay = main.tool_request(3)
+        replay["params"].update(
+            {
+                "inputResponses": {
+                    "delete_choice": {
+                        "action": "accept",
+                        "content": {"note_id": "note-7", "confirm": True},
+                    }
+                },
+                "requestState": state,
+            }
+        )
+        rejected = self.server.dispatch(replay)
+        self.assertEqual(rejected["error"]["code"], -32602)
+        self.assertIn("note-7", self.server.notes)
+
+    def test_two_servers_consume_confirmation_atomically(self) -> None:
+        class CoordinatedReplayStore(main.ReplayStore):
+            def __init__(self) -> None:
+                super().__init__(max_entries=10)
+                self.ready = threading.Barrier(2)
+
+            def claim_and_consume(self, nonce, **kwargs):
+                self.ready.wait(timeout=2)
+                return super().claim_and_consume(nonce, **kwargs)
+
+        replay_store = CoordinatedReplayStore()
+        first_server = main.NotesServer(replay_store=replay_store)
+        second_server = main.NotesServer(
+            notes=first_server.notes,
+            replay_store=replay_store,
+        )
+        first = first_server.dispatch(main.tool_request(1))
+        state = first["result"]["requestState"]
+
+        def retry(server: main.NotesServer, request_id: int, note_id: str) -> dict:
+            request = main.tool_request(request_id)
+            request["params"].update(
+                {
+                    "inputResponses": {
+                        "delete_choice": {
+                            "action": "accept",
+                            "content": {"note_id": note_id, "confirm": True},
+                        }
+                    },
+                    "requestState": state,
+                }
+            )
+            return server.dispatch(request)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(
+                pool.map(
+                    lambda item: retry(*item),
+                    (
+                        (first_server, 2, "note-14"),
+                        (second_server, 3, "note-7"),
+                    ),
+                )
+            )
+
+        self.assertEqual(sum("result" in response for response in responses), 1)
+        self.assertEqual(sum("error" in response for response in responses), 1)
+        self.assertEqual(
+            sum(
+                note_id in first_server.notes
+                for note_id in ("note-14", "note-7")
+            ),
+            1,
+        )
+
+    def test_replay_store_is_bounded_and_prunes_expired_claims(self) -> None:
+        now = [100.0]
+        store = main.ReplayStore(max_entries=1, clock=lambda: now[0])
+        completed: list[str] = []
+        store.claim_and_consume(
+            "first",
+            expires_at=110.0,
+            operation=lambda: completed.append("first"),
+        )
+        with self.assertRaisesRegex(main.McpError, "capacity exhausted"):
+            store.claim_and_consume(
+                "second",
+                expires_at=120.0,
+                operation=lambda: completed.append("second"),
+            )
+        self.assertEqual(completed, ["first"])
+
+        now[0] = 111.0
+        store.claim_and_consume(
+            "second",
+            expires_at=120.0,
+            operation=lambda: completed.append("second"),
+        )
+        self.assertEqual(completed, ["first", "second"])
+
+    def test_cancelled_or_invalid_confirmation_does_not_consume_state(self) -> None:
+        first = self.server.dispatch(main.tool_request(1))
+        state = first["result"]["requestState"]
+
+        invalid = main.tool_request(2)
+        invalid["params"].update(
+            {
+                "inputResponses": {
+                    "delete_choice": {
+                        "action": "accept",
+                        "content": {"note_id": "note-99", "confirm": True},
+                    }
+                },
+                "requestState": state,
+            }
+        )
+        self.assertEqual(self.server.dispatch(invalid)["error"]["code"], -32602)
+
+        cancelled = main.tool_request(3)
+        cancelled["params"].update(
+            {
+                "inputResponses": {
+                    "delete_choice": {"action": "cancel", "content": {}},
+                },
+                "requestState": state,
+            }
+        )
+        self.assertFalse(
+            self.server.dispatch(cancelled)["result"]["structuredContent"]["deleted"]
+        )
+
+        accepted = main.tool_request(4)
+        accepted["params"].update(
+            {
+                "inputResponses": {
+                    "delete_choice": {
+                        "action": "accept",
+                        "content": {"note_id": "note-14", "confirm": True},
+                    }
+                },
+                "requestState": state,
+            }
+        )
+        response = self.server.dispatch(accepted)
+        self.assertTrue(response["result"]["structuredContent"]["deleted"])
+
     def test_out_of_scope_match_is_not_exposed(self) -> None:
         response = self.server.dispatch(main.tool_request(1, title="outside root"))
         self.assertEqual(response["result"]["resultType"], "complete")
@@ -163,6 +357,29 @@ class ScopeAndElicitationTests(unittest.TestCase):
         )
         response = self.server.dispatch(retry)
         self.assertEqual(response["error"]["code"], -32602)
+
+    def test_continuation_fields_require_presence_and_non_null_values(self) -> None:
+        first = self.server.dispatch(main.tool_request(1))
+        state = first["result"]["requestState"]
+        cases = [
+            ({"requestState": state}, "provided together"),
+            ({"inputResponses": {}}, "provided together"),
+            (
+                {"requestState": None, "inputResponses": {}},
+                "requestState must be a string",
+            ),
+            (
+                {"requestState": state, "inputResponses": None},
+                "inputResponses must be an object",
+            ),
+        ]
+        for continuation, message in cases:
+            with self.subTest(continuation=continuation):
+                request = main.tool_request(2)
+                request["params"].update(continuation)
+                response = self.server.dispatch(request)
+                self.assertEqual(response["error"]["code"], -32602)
+                self.assertIn(message, response["error"]["message"])
 
     def test_unsupported_version_is_rejected(self) -> None:
         request = main.tool_request(1)

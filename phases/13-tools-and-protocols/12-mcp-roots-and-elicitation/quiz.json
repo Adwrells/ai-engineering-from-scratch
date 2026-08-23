@@ -72,7 +72,7 @@
         "Trust any note id returned with action accept"
       ],
       "correct": 1,
-      "explanation": "Integrity-protected state prevents tampering and cross-request reuse, while final live checks address races before mutation."
+      "explanation": "Integrity-protected state prevents tampering. A shared atomic one-time nonce claim prevents replay, while final live checks address races before mutation."
     }
   ]
 }

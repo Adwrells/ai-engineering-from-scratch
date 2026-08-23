@@ -21,7 +21,7 @@ syntax as universal.
 
 | Host | Start or resume |
 |---|---|
-| Codex | `$learn-agent-skills`, or choose `learn-agent-skills` from `/skills` |
+| Codex | `learn-agent-skills`, or choose it from `/skills` |
 | Claude Code | `/learn-agent-skills` |
 | Other compatible hosts | `Use learn-agent-skills to start or resume the Agent Skills Engineering path.` |
 

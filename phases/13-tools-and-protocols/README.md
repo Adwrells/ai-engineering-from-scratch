@@ -52,7 +52,7 @@ Start with the invocation supported by your host:
 
 | Host | Invocation |
 |---|---|
-| Codex | `$learn-mcp`, or choose `learn-mcp` from `/skills` |
+| Codex | `learn-mcp`, or choose it from `/skills` |
 | Claude Code | `/learn-mcp` |
 | Other compatible hosts | `Use learn-mcp to start or resume the Model Context Protocol (MCP) path.` |
 
@@ -104,7 +104,7 @@ Start with the invocation supported by your host:
 
 | Host | Invocation |
 |---|---|
-| Codex | `$learn-agent-skills`, or choose `learn-agent-skills` from `/skills` |
+| Codex | `learn-agent-skills`, or choose it from `/skills` |
 | Claude Code | `/learn-agent-skills` |
 | Other compatible hosts | `Use learn-agent-skills to start or resume the Agent Skills Engineering path.` |
 

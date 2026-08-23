@@ -118,7 +118,7 @@ Invocation syntax belongs to the host, not to the portable `SKILL.md` format:
 
 | Host | Start the course | Start Model Context Protocol (MCP) | Start Agent Skills | Run a phase quiz |
 |---|---|---|---|---|
-| Codex | `$start-learning`, or choose it from `/skills` | `$learn-mcp`, or choose it from `/skills` | `$learn-agent-skills`, or choose it from `/skills` | `$check-understanding 13`, or choose it from `/skills` |
+| Codex | `start-learning`, or choose it from `/skills` | `learn-mcp`, or choose it from `/skills` | `learn-agent-skills`, or choose it from `/skills` | `check-understanding 13`, or choose it from `/skills` |
 | Claude Code | `/start-learning` | `/learn-mcp` | `/learn-agent-skills` | `/check-understanding 13` |
 | Other compatible hosts | `Use start-learning to begin the course.` | `Use learn-mcp to start the Model Context Protocol (MCP) path.` | `Use learn-agent-skills to start the Agent Skills Engineering path.` | `Use check-understanding to quiz me on Phase 13.` |
 
@@ -127,7 +127,7 @@ saves a personalized study plan to `LEARNING.md`. From there, the `learn` skill
 teaches one lesson per session: concept, math, code, quiz. It streams lessons
 straight from this repo, and the `course-guide` skill jumps you to the exact
 lesson that covers anything you are stuck on. In Codex, invoke these skills with
-`$learn` and `$course-guide`; in Claude Code, use `/learn` and `/course-guide`;
+`learn` and `course-guide`; in Claude Code, use `/learn` and `/course-guide`;
 in other compatible hosts, ask to use the skill by name.
 
 Only want Model Context Protocol (MCP)? Use the MCP invocation for your host. It creates
@@ -281,7 +281,7 @@ diagnostic, capstone work, and a full-length original practice exam.
 
 Use the [AI-native GitHub onboarding guide](../../certifications/claude/GETTING_STARTED.md)
 with Claude Code, Codex, ChatGPT, Cursor, or another agent. Run
-`$claude-certification` in Codex, `/claude-certification` in Claude Code, or ask
+`claude-certification` in Codex, `/claude-certification` in Claude Code, or ask
 another host to use `claude-certification`. It chooses a track, creates a
 persistent route in `CLAUDE-CERTIFICATION.md`, teaches one step at a time, runs
 the real labs, and gives artifact-based feedback. The same curriculum remains

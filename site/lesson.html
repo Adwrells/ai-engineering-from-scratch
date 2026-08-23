@@ -5396,7 +5396,7 @@
         html += '<div class="quiz-score" id="quizScore"><div class="quiz-score-number" id="quizScoreNum">0/' + questions.length + '</div><div class="quiz-score-label">Complete all questions to see your score</div></div>';
         var phaseArgumentMatch = phase.match(/^(\d+)/);
         var phaseArgument = phaseArgumentMatch ? phaseArgumentMatch[1] : phase || 'current phase';
-        html += '<div class="quiz-deeper">Want a deeper quiz? In Codex use <code>$check-understanding ' + escapeHtml(phaseArgument) + '</code> or choose it from <code>/skills</code>. In Claude Code use <code>/check-understanding ' + escapeHtml(phaseArgument) + '</code>. In another compatible host say: <code>Use check-understanding to quiz me on Phase ' + escapeHtml(phaseArgument) + '.</code></div>';
+        html += '<div class="quiz-deeper">Want a deeper quiz? In Codex use <code>check-understanding ' + escapeHtml(phaseArgument) + '</code> or choose it from <code>/skills</code>. In Claude Code use <code>/check-understanding ' + escapeHtml(phaseArgument) + '</code>. In another compatible host say: <code>Use check-understanding to quiz me on Phase ' + escapeHtml(phaseArgument) + '.</code></div>';
         html += '</div>';
 
         body.innerHTML = html;

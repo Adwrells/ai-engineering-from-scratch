@@ -22,8 +22,8 @@ answer, and run things — never just scroll. Works with any agent.
 Skill names are portable, but invocation syntax belongs to the host. Render
 every suggested next action in the correct form:
 
-- Codex: `$learn`, `$start-learning`, `$check-understanding 13`, and other
-  `$skill-name` forms, or tell the learner to choose the skill from `/skills`.
+- Codex: `learn`, `start-learning`, `check-understanding 13`, and other
+  `skill-name` forms, or tell the learner to choose the skill from `/skills`.
 - Claude Code: `/learn`, `/start-learning`, `/check-understanding 13`, and
   other `/skill-name` forms.
 - Other compatible hosts: natural language such as `Use start-learning to

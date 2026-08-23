@@ -34,7 +34,7 @@
     }
   ],
   "invocation": {
-    "codex": "$learn-mcp, or choose learn-mcp from /skills",
+    "codex": "learn-mcp, or choose it from /skills",
     "claudeCode": "/learn-mcp",
     "portableFallback": "Use learn-mcp to start or resume the Model Context Protocol (MCP) path."
   },

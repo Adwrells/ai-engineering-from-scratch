@@ -47,7 +47,7 @@
     }
   ],
   "invocation": {
-    "codex": "$learn-agent-skills, or choose learn-agent-skills from /skills",
+    "codex": "learn-agent-skills, or choose it from /skills",
     "claudeCode": "/learn-agent-skills",
     "portableFallback": "Use learn-agent-skills to start or resume the Agent Skills Engineering path."
   },

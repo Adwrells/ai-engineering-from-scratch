@@ -23,7 +23,7 @@ lives and which command to run next. Works with any agent.
 Skill names are portable, but invocation syntax belongs to the host. Render
 every recommended next action in the correct form:
 
-- Codex: `$learn`, `$start-learning`, `$course-guide`, and other `$skill-name`
+- Codex: `learn`, `start-learning`, `course-guide`, and other `skill-name`
   forms, or tell the learner to choose the skill from `/skills`.
 - Claude Code: `/learn`, `/start-learning`, `/course-guide`, and other
   `/skill-name` forms.

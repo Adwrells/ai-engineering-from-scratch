@@ -28,7 +28,7 @@ text and wait for the reply.
 Skill names are portable, but invocation syntax belongs to the host. Before
 showing a next command, use the correct form:
 
-- Codex: `$start-learning`, `$learn`, `$course-guide`, and other `$skill-name`
+- Codex: `start-learning`, `learn`, `course-guide`, and other `skill-name`
   forms, or tell the learner to choose the skill from `/skills`.
 - Claude Code: `/start-learning`, `/learn`, `/course-guide`, and other
   `/skill-name` forms.
@@ -73,7 +73,7 @@ If the learner explicitly wants Model Context Protocol (MCP) rather than the
 full course, do not run placement and do not create `LEARNING.md`. Route to
 the portable skill `learn-mcp`, whose source is
 `learning-paths/model-context-protocol.json` and whose state file is
-`MCP-LEARNING.md`. Use `$learn-mcp` in Codex,
+`MCP-LEARNING.md`. Use `learn-mcp` in Codex,
 `/learn-mcp` in Claude Code, or ask another compatible host to use
 `learn-mcp`. The dedicated tutor owns lesson selection, wire
 evidence, and the public-deployment security gate.
@@ -84,7 +84,7 @@ If the learner explicitly wants Agent Skills instead of the full course, or
 `AGENT-SKILLS-LEARNING.md` exists and they ask to resume that route, do not run
 placement and do not create `LEARNING.md`. Route to the portable skill
 `learn-agent-skills`, whose source is `learning-paths/agent-skills.json` and
-whose state file is `AGENT-SKILLS-LEARNING.md`. Use `$learn-agent-skills` in
+whose state file is `AGENT-SKILLS-LEARNING.md`. Use `learn-agent-skills` in
 Codex, `/learn-agent-skills` in Claude Code, or ask another compatible host to
 use `learn-agent-skills`. The dedicated tutor owns the five-lesson order,
 real-host evidence, sandbox boundaries, the Lesson 25 and tool-poisoning

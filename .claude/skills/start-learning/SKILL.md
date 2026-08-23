@@ -23,6 +23,22 @@ Works with any agent. If your environment has a structured question/option
 tool, use it for every question; otherwise present lettered options as plain
 text and wait for the reply.
 
+## Resume routing across course modes
+
+Before resolving an unnamed "resume" or "continue" request, inspect all four
+supported state files in the current directory:
+
+- `LEARNING.md` belongs to `learn` for the full curriculum.
+- `MCP-ENGINEERING-LEARNING.md` belongs to `learn-mcp-engineering`.
+- `AGENT-SKILLS-LEARNING.md` belongs to `learn-agent-skills`.
+- `CLAUDE-CERTIFICATION.md` belongs to `claude-certification`.
+
+If the learner names a route, use its owner even when other state files exist.
+If the request is unnamed and exactly one state file exists, resume its owner.
+If two or more exist, list the available routes and ask which one to resume
+before running placement or changing any state. Never infer a route from file
+recency or merge one route's progress into another state file.
+
 ## Focused MCP handoff
 
 If the learner explicitly wants MCP Engineering rather than the full course,
@@ -33,6 +49,17 @@ skill `learn-mcp-engineering`, whose source is
 `/learn-mcp-engineering` in Claude Code, or ask another compatible host to use
 `learn-mcp-engineering`. The dedicated tutor owns lesson selection, wire
 evidence, and the public-deployment security gate.
+
+## Focused Agent Skills handoff
+
+If the learner explicitly wants Agent Skills instead of the full course, or
+`AGENT-SKILLS-LEARNING.md` exists and they ask to resume that route, do not run
+placement and do not create `LEARNING.md`. Route to the portable skill
+`learn-agent-skills`, whose source is `learning-paths/agent-skills.json` and
+whose state file is `AGENT-SKILLS-LEARNING.md`. Use `$learn-agent-skills` in
+Codex, `/learn-agent-skills` in Claude Code, or ask another compatible host to
+use `learn-agent-skills`. The dedicated tutor owns lesson selection, real-host
+evidence, and the poisoning knowledge preflight.
 
 If `LEARNING.md` already exists, do not overwrite it. Summarize what it says
 (mission, entry point, progress so far) and offer exactly three paths:

@@ -87,7 +87,7 @@ If it does not exist, create it without an interview:
 - Install scope: Project, User, or Pending
 - Phase 13 Lesson 01 refresher: Done, Skipped, or Pending
 - Phase 13 Lesson 05 refresher: Done, Skipped, or Pending
-- Phase 13 Lesson 15 before Lesson 26: Done or Pending
+- `tool-poisoning-and-untrusted-instructions`: Confirmed or Pending
 
 ## Progress
 | Order | Lesson | Status | Evidence | Completed |
@@ -106,11 +106,15 @@ scope choice that cannot be inferred safely. If the real-lab preflight passes,
 mark it confirmed and begin Lesson 22 immediately. Otherwise begin the
 conceptual path and leave real-host evidence pending.
 
-Before Lesson 26, read its `prerequisitePaths` from the manifest. Verify that
-Lesson 25 is complete and that Phase 13 Lesson 15 is complete or the learner
-can explain tool poisoning and untrusted instructions. If either requirement
-is unmet, show the exact detour and leave Lesson 26 as `Next`. Never drop or
-mark a prerequisite complete by assumption.
+Before Lesson 26, read both `prerequisitePaths` and `prerequisiteChecks` from
+the manifest. Resolve every check by its stable `id` under `prerequisites`.
+Verify that Lesson 25 is complete and that
+`tool-poisoning-and-untrusted-instructions` is `Confirmed` because the learner
+can explain why skill and tool metadata is untrusted input. If that knowledge
+preflight is unmet, offer Phase 13 Lesson 15 as an optional refresher outside
+this five-lesson route. Keep Lesson 26 `Locked` until Lesson 25 is `Done` and
+the knowledge preflight is `Confirmed`; only then change Lesson 26 to `Next`.
+Never drop or mark a prerequisite complete by assumption.
 
 ## Teach one lesson
 

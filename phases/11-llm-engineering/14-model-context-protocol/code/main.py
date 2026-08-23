@@ -148,11 +148,11 @@ class MCPServer:
             return self._error(None, -32600, "request must be an object")
 
         request_id = message.get("id")
+        if "id" not in message:
+            return None
         if message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str):
             error_id = request_id if type(request_id) in (str, int) else None
             return self._error(error_id, -32600, "invalid JSON-RPC request")
-        if "id" not in message:
-            return None
         if type(request_id) not in (str, int):
             return self._error(None, -32600, "id must be a string or integer")
 
@@ -165,101 +165,127 @@ class MCPServer:
         if metadata_error:
             return metadata_error
 
-        try:
-            if method == "server/discover":
-                result = self._complete(
-                    {
-                        "supportedVersions": list(SUPPORTED_VERSIONS),
-                        "capabilities": self._capabilities(),
-                        "instructions": "Use add for arithmetic and request approval before delete_user.",
-                    },
-                    cacheable=True,
-                )
-            elif method == "tools/list":
-                result = self._complete(
-                    {
-                        "tools": [
-                            {
-                                "name": tool.name,
-                                "description": tool.description,
-                                "inputSchema": tool.input_schema,
-                                "annotations": (
-                                    {"destructiveHint": True} if tool.destructive else {}
-                                ),
-                            }
-                            for tool in sorted(self.tools.values(), key=lambda item: item.name)
-                        ]
-                    },
-                    cacheable=True,
-                )
-            elif method == "tools/call":
-                tool = self.tools[params["name"]]
-                output = tool.handler(**params.get("arguments", {}))
-                result = self._complete(
-                    {"content": [{"type": "text", "text": json.dumps(output)}], "isError": False}
-                )
-            elif method == "resources/list":
-                result = self._complete(
-                    {
-                        "resources": [
-                            {
-                                "uri": item.uri,
-                                "name": item.name,
-                                "description": item.description,
-                            }
-                            for item in sorted(self.resources.values(), key=lambda item: item.uri)
-                        ]
-                    },
-                    cacheable=True,
-                )
-            elif method == "resources/read":
-                resource = self.resources[params["uri"]]
-                result = self._complete(
-                    {
-                        "contents": [
-                            {
-                                "uri": resource.uri,
-                                "mimeType": "text/plain",
-                                "text": resource.handler(),
-                            }
-                        ]
-                    },
-                    cacheable=True,
-                )
-            elif method == "prompts/list":
-                result = self._complete(
-                    {
-                        "prompts": [
-                            {
-                                "name": item.name,
-                                "description": item.description,
-                                "arguments": [
-                                    {"name": argument, "required": True}
-                                    for argument in item.arguments
-                                ],
-                            }
-                            for item in sorted(self.prompts.values(), key=lambda item: item.name)
-                        ]
-                    },
-                    cacheable=True,
-                )
-            elif method == "prompts/get":
-                prompt = self.prompts[params["name"]]
-                rendered = prompt.handler(**params.get("arguments", {}))
-                result = self._complete(
-                    {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": {"type": "text", "text": rendered},
-                            }
-                        ]
-                    }
-                )
-            else:
-                return self._error(request_id, -32601, f"unknown method: {method}")
-        except KeyError as error:
-            return self._error(request_id, -32602, f"missing or unknown key: {error}")
+        if method == "server/discover":
+            result = self._complete(
+                {
+                    "supportedVersions": list(SUPPORTED_VERSIONS),
+                    "capabilities": self._capabilities(),
+                    "instructions": "Use add for arithmetic and request approval before delete_user.",
+                },
+                cacheable=True,
+            )
+        elif method == "tools/list":
+            result = self._complete(
+                {
+                    "tools": [
+                        {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "inputSchema": tool.input_schema,
+                            "annotations": (
+                                {"destructiveHint": True} if tool.destructive else {}
+                            ),
+                        }
+                        for tool in sorted(self.tools.values(), key=lambda item: item.name)
+                    ]
+                },
+                cacheable=True,
+            )
+        elif method == "tools/call":
+            name = params.get("name")
+            if not isinstance(name, str) or name not in self.tools:
+                return self._error(request_id, -32602, "missing or unknown tool name")
+            arguments = params.get("arguments", {})
+            if not isinstance(arguments, dict):
+                return self._error(request_id, -32602, "arguments must be an object")
+            tool = self.tools[name]
+            try:
+                output = json.dumps(tool.handler(**arguments))
+            except Exception:
+                return self._error(request_id, -32603, "tool handler failed")
+            result = self._complete(
+                {"content": [{"type": "text", "text": output}], "isError": False}
+            )
+        elif method == "resources/list":
+            result = self._complete(
+                {
+                    "resources": [
+                        {
+                            "uri": item.uri,
+                            "name": item.name,
+                            "description": item.description,
+                        }
+                        for item in sorted(self.resources.values(), key=lambda item: item.uri)
+                    ]
+                },
+                cacheable=True,
+            )
+        elif method == "resources/read":
+            uri = params.get("uri")
+            if not isinstance(uri, str) or uri not in self.resources:
+                return self._error(request_id, -32602, "missing or unknown resource URI")
+            resource = self.resources[uri]
+            try:
+                text = resource.handler()
+                if not isinstance(text, str):
+                    raise TypeError("resource handler must return text")
+            except Exception:
+                return self._error(request_id, -32603, "resource handler failed")
+            result = self._complete(
+                {
+                    "contents": [
+                        {
+                            "uri": resource.uri,
+                            "mimeType": "text/plain",
+                            "text": text,
+                        }
+                    ]
+                },
+                cacheable=True,
+            )
+        elif method == "prompts/list":
+            result = self._complete(
+                {
+                    "prompts": [
+                        {
+                            "name": item.name,
+                            "description": item.description,
+                            "arguments": [
+                                {"name": argument, "required": True}
+                                for argument in item.arguments
+                            ],
+                        }
+                        for item in sorted(self.prompts.values(), key=lambda item: item.name)
+                    ]
+                },
+                cacheable=True,
+            )
+        elif method == "prompts/get":
+            name = params.get("name")
+            if not isinstance(name, str) or name not in self.prompts:
+                return self._error(request_id, -32602, "missing or unknown prompt name")
+            arguments = params.get("arguments", {})
+            if not isinstance(arguments, dict):
+                return self._error(request_id, -32602, "arguments must be an object")
+            prompt = self.prompts[name]
+            try:
+                rendered = prompt.handler(**arguments)
+                if not isinstance(rendered, str):
+                    raise TypeError("prompt handler must return text")
+            except Exception:
+                return self._error(request_id, -32603, "prompt handler failed")
+            result = self._complete(
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": {"type": "text", "text": rendered},
+                        }
+                    ]
+                }
+            )
+        else:
+            return self._error(request_id, -32601, f"unknown method: {method}")
 
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 

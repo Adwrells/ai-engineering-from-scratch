@@ -12,8 +12,7 @@
 - Explain the separate responsibilities of MCP host, client, and server
 - Build the MCP `2026-07-28` per-request metadata envelope
 - Implement mandatory `server/discover`, complete results, and cache hints
-- Use Multi Round-Trip Requests for roots, sampling, and elicitation compatibility
-- Explain why Roots, Sampling, and Logging are deprecated for new designs
+- Use Multi Round-Trip Requests for roots, sampling, and elicitation compatibility; explain why roots, sampling, and logging are deprecated for new designs
 - Deploy current Streamable HTTP without protocol sessions or sticky routing
 - Apply authorization, consent, integrity, and untrusted-output controls
 

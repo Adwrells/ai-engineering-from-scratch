@@ -53,7 +53,9 @@ class Capability:
             if name not in properties:
                 continue
             expected = properties[name].get("type")
-            if expected not in checks or not checks[expected](value):
+            if expected not in checks:
+                raise ValueError(f"unsupported schema type for {name}: {expected!r}")
+            if not checks[expected](value):
                 raise ValueError(f"{name} must be {expected}")
         return arguments
 
@@ -332,7 +334,6 @@ class MCPServer:
             },
         }
         capabilities = metadata[CLIENT_CAPABILITIES_KEY]
-        required = {"roots": {}, "sampling": {}, "elicitation": {"form": {}}}
         missing: dict[str, Any] = {}
         if not isinstance(capabilities.get("roots"), dict):
             missing["roots"] = {}

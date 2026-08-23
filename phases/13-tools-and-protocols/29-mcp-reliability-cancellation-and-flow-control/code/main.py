@@ -65,6 +65,10 @@ class RequestCoordinator:
         max_timeout_ms: int,
         progress_token: int | str | None = None,
     ) -> InFlightRequest:
+        if type(request_id) not in (int, str):
+            raise ReliabilityError("request id must be an integer or string")
+        if progress_token is not None and type(progress_token) not in (int, str):
+            raise ReliabilityError("progress token must be an integer or string")
         if request_id in self.requests:
             raise ReliabilityError("request ids must be unique while tracked")
         if transport not in {STDIO, STREAMABLE_HTTP}:
@@ -158,7 +162,10 @@ class RequestCoordinator:
         params = notification.get("params")
         if not isinstance(params, dict):
             return None
-        request = self.requests.get(params.get("requestId"))
+        request_id = params.get("requestId")
+        if type(request_id) not in (int, str):
+            return None
+        request = self.requests.get(request_id)
         if request is None or request.transport != STDIO or request.state != IN_PROGRESS:
             return None
         request.state = CANCELLED
@@ -215,6 +222,8 @@ class RequestCoordinator:
             raise ReliabilityError(
                 "server-sent notifications/cancelled is reserved for stdio subscriptions/listen"
             )
+        if request.state != IN_PROGRESS:
+            raise ReliabilityError("subscription request is no longer in progress")
         request.state = CANCELLED
         return {
             "jsonrpc": "2.0",

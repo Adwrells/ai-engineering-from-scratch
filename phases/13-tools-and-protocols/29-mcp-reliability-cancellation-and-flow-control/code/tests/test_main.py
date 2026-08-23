@@ -92,6 +92,58 @@ class ReliabilityTests(unittest.TestCase):
         )
         self.assertEqual(self.coordinator.requests[4].state, main.IN_PROGRESS)
 
+    def test_unhashable_and_boolean_cancellation_ids_are_ignored(self) -> None:
+        request = self.start(1)
+        for request_id in ([], {}, True):
+            with self.subTest(request_id=request_id):
+                notification = {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/cancelled",
+                    "params": {"requestId": request_id},
+                }
+                self.assertIsNone(
+                    self.coordinator.receive_stdio_cancellation(notification)
+                )
+                self.assertEqual(request.state, main.IN_PROGRESS)
+
+    def test_start_rejects_noncanonical_request_ids_before_lookup(self) -> None:
+        class DerivedInt(int):
+            pass
+
+        for request_id in (True, [], {}, 1.5, None, DerivedInt(7)):
+            with self.subTest(request_id=request_id):
+                with self.assertRaisesRegex(
+                    main.ReliabilityError,
+                    "request id must be an integer or string",
+                ):
+                    self.coordinator.start(
+                        request_id,
+                        "tools/call",
+                        transport=main.STDIO,
+                        started_at_ms=0,
+                        idle_timeout_ms=500,
+                        max_timeout_ms=2_000,
+                    )
+        self.assertEqual(self.coordinator.requests, {})
+
+    def test_start_rejects_noncanonical_progress_tokens(self) -> None:
+        for index, progress_token in enumerate((True, [], {}, 1.5), start=1):
+            with self.subTest(progress_token=progress_token):
+                with self.assertRaisesRegex(
+                    main.ReliabilityError,
+                    "progress token must be an integer or string",
+                ):
+                    self.coordinator.start(
+                        index,
+                        "tools/call",
+                        transport=main.STDIO,
+                        started_at_ms=0,
+                        idle_timeout_ms=500,
+                        max_timeout_ms=2_000,
+                        progress_token=progress_token,
+                    )
+        self.assertEqual(self.coordinator.requests, {})
+
     def test_progress_resets_idle_timeout_but_not_maximum_timeout(self) -> None:
         self.start(5, progress_token="p-5")
         self.coordinator.progress(5, 1, now_ms=400)
@@ -274,6 +326,30 @@ class ReliabilityTests(unittest.TestCase):
         self.start(9)
         with self.assertRaises(main.ReliabilityError):
             self.coordinator.server_cancel_subscription(9)
+
+    def test_completed_subscription_rejects_late_server_cancellation(self) -> None:
+        request = self.coordinator.start(
+            "listen-complete",
+            "subscriptions/listen",
+            transport=main.STDIO,
+            started_at_ms=0,
+            idle_timeout_ms=500,
+            max_timeout_ms=2_000,
+        )
+        response = self.coordinator.complete(
+            "listen-complete", {"resultType": "complete"}
+        )
+
+        with self.assertRaisesRegex(main.ReliabilityError, "no longer in progress"):
+            self.coordinator.server_cancel_subscription("listen-complete")
+
+        self.assertEqual(request.state, main.COMPLETED)
+        self.assertEqual(
+            self.coordinator.complete(
+                "listen-complete", {"resultType": "complete", "changed": True}
+            ),
+            response,
+        )
 
 
 if __name__ == "__main__":

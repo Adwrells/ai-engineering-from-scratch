@@ -233,7 +233,7 @@ protocol-version parity.
 MCP list operations use cursor pagination. The server selects page size and cursor format. The client gets one decision:
 
 ```python
-if "nextCursor" not in result:
+if result.get("nextCursor") is None:
     break
 cursor = result["nextCursor"]
 ```
@@ -368,7 +368,8 @@ Open `code/main.py` and locate `TOOLS`.
 1. Change `tag_catalog.outputSchema.type` from `array` to `object`.
 2. Run the demo. The client should reject the returned array.
 3. Restore the schema.
-4. Change the first page's `nextCursor` from `""` to `None` and omit the field when no next page exists.
+4. Keep the first page's `nextCursor` as `""`, then make the final page return
+   `nextCursor: None` instead of omitting the field.
 5. Run the tests and compare the cursor trace.
 6. Add `x-mcp-header: "Authorization"` to a string property.
 7. Confirm descriptor admission rejects it before invocation.

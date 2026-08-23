@@ -24,6 +24,7 @@ BASE64_SENTINEL_PREFIX = "=?base64?"
 BASE64_SENTINEL_SUFFIX = "?="
 JS_SAFE_INTEGER_MIN = -(2**53) + 1
 JS_SAFE_INTEGER_MAX = 2**53 - 1
+MAX_TOOL_LIST_PAGES = 100
 SENSITIVE_NAMES = {
     "api_key",
     "apikey",
@@ -668,9 +669,18 @@ def streamable_http_tool_call(
 
 
 class ContractClient:
-    def __init__(self, server: ContractServer, *, principal: str = "analyst") -> None:
+    def __init__(
+        self,
+        server: ContractServer,
+        *,
+        principal: str = "analyst",
+        max_list_pages: int = MAX_TOOL_LIST_PAGES,
+    ) -> None:
+        if type(max_list_pages) is not int or max_list_pages <= 0:
+            raise ContractViolation("tools/list page limit must be a positive integer")
         self.server = server
         self.principal = principal
+        self.max_list_pages = max_list_pages
         self.rejections: list[dict[str, str]] = []
         self.cursor_trace: list[str | None] = []
         self.tools: dict[str, dict[str, Any]] = {}
@@ -678,7 +688,8 @@ class ContractClient:
     def discover_tools(self) -> dict[str, dict[str, Any]]:
         cursor: str | None = None
         request_id = 1
-        while True:
+        seen_cursors: set[str] = set()
+        for _ in range(self.max_list_pages):
             params: dict[str, Any] = {}
             if cursor is not None:
                 params["cursor"] = cursor
@@ -694,11 +705,19 @@ class ContractClient:
                     self.rejections.append({"tool": tool.get("name", "<unknown>"), "reason": str(exc)})
                     continue
                 self.tools[tool["name"]] = tool
-            if "nextCursor" not in result:
-                break
-            cursor = result["nextCursor"]
+            next_cursor = result.get("nextCursor")
+            if next_cursor is None:
+                return self.tools
+            if not isinstance(next_cursor, str):
+                raise ContractViolation("tools/list nextCursor must be a string or null")
+            if next_cursor in seen_cursors:
+                raise ContractViolation("tools/list returned a repeated or cyclic nextCursor")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
             request_id += 1
-        return self.tools
+        raise ContractViolation(
+            f"tools/list exceeded the page limit of {self.max_list_pages}"
+        )
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if not self.tools:

@@ -141,6 +141,20 @@ class StreamableHttpTests(unittest.TestCase):
                 self.assertEqual(status, 400)
                 self.assertEqual(payload["error"]["code"], -32700)
 
+    def test_content_length_accepts_only_ascii_decimal_digits(self) -> None:
+        message = main.make_request(421, "tools/list")
+        base_headers = list(main.http_headers_for(message).items())
+        for content_length in ("+1", "1.0", "\u00b2"):
+            with self.subTest(content_length=content_length):
+                headers = base_headers + [("Content-Length", content_length)]
+                status, payload = self.raw_post(headers, b"{")
+                self.assertEqual(status, 400)
+                self.assertEqual(payload["error"]["code"], -32700)
+                self.assertEqual(
+                    payload["error"]["data"]["detail"],
+                    "Content-Length must contain ASCII decimal digits",
+                )
+
     def test_conflicting_content_lengths_are_rejected_before_body_read(self) -> None:
         message = main.make_request(43, "tools/list")
         headers = list(main.http_headers_for(message).items())

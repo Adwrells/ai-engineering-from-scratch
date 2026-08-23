@@ -17,6 +17,15 @@ class Actor(str, Enum):
     HARNESS = "harness"
 
 
+def _actor_label(actor: object) -> str:
+    value = getattr(actor, "value", actor)
+    if isinstance(value, str) and value:
+        return value
+    if value is None:
+        return "unknown"
+    return type(value).__name__
+
+
 @dataclass(frozen=True)
 class SkillMetadata:
     name: str
@@ -82,7 +91,7 @@ class InvocationRequest:
 @dataclass(frozen=True)
 class InvocationDecision:
     activated: bool
-    actor: Actor
+    actor: Actor | str
     skill_name: str | None
     mode: str
     score: float
@@ -90,7 +99,9 @@ class InvocationDecision:
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
-        data["actor"] = self.actor.value
+        data["actor"] = (
+            self.actor.value if isinstance(self.actor, Actor) else self.actor
+        )
         return data
 
 
@@ -148,7 +159,7 @@ class CorePolicyAdapter:
                 and skill.name in self.policy.harness_allowlist
             )
             return allowed, "programmatic activation policy and allowlist"
-        return False, f"unknown actor {actor.value!r} has no activation policy"
+        return False, f"unknown actor {_actor_label(actor)!r} has no activation policy"
 
 
 def _extension_false(value: object) -> bool:
@@ -208,6 +219,16 @@ def route_request(
     request: InvocationRequest,
     adapter: CorePolicyAdapter,
 ) -> InvocationDecision:
+    if not isinstance(request.actor, Actor):
+        actor = _actor_label(request.actor)
+        return InvocationDecision(
+            False,
+            actor,
+            None,
+            "unsupported-actor",
+            0.0,
+            f"unknown actor {actor!r} has no activation policy",
+        )
     candidates = sorted(skills, key=lambda item: item.name)
     explicit_modes = {
         Actor.HUMAN: "explicit-human",

@@ -1904,6 +1904,11 @@
       border-color: transparent;
     }
 
+    .prerequisite-callout:focus {
+      outline: 2px solid var(--blueprint);
+      outline-offset: 3px;
+    }
+
     .phase-complete-callout {
       position: relative;
       overflow: hidden;
@@ -2854,7 +2859,10 @@
         var unmet = unmetLearningPathPrerequisites(entry);
         var unmetChecks = learningPathPrerequisiteChecks(entry);
         if (!unmet.length && !unmetChecks.length) return '';
-        var html = '<div class="continue-callout prerequisite-callout"><strong>' + escapeHtml(heading || 'Prerequisite check') + '</strong><br>';
+        var html = '<div class="continue-callout prerequisite-callout" role="status" tabindex="-1" data-learning-path-prerequisite-callout="true"' +
+          ' data-prerequisite-paths="' + escapeAttr(unmet.join(' ')) + '"' +
+          ' data-prerequisite-checks="' + escapeAttr(unmetChecks.map(function (check) { return check.id; }).join(' ')) + '"><strong>' +
+          escapeHtml(heading || 'Prerequisite check') + '</strong><br>';
         for (var index = 0; index < unmet.length; index++) {
           var prerequisitePath = unmet[index];
           var label = learningPathPrerequisiteLabel(prerequisitePath);
@@ -2890,13 +2898,18 @@
         });
       }
 
-      function linkHasUnmetLearningPathPrerequisite(link) {
-        if (!learningPathMode || !link) return false;
+      function linkUnmetLearningPathPrerequisitePaths(link) {
+        if (!learningPathMode || !link) return [];
         var paths = (link.getAttribute('data-prerequisite-paths') || '').split(/\s+/).filter(Boolean);
-        var unmetPaths = paths.some(function (path) {
+        return paths.filter(function (path) {
           return !(window.AIFSProgress && window.AIFSProgress.isLessonComplete(path));
         });
-        return unmetPaths || linkUnmetLearningPathCheckIds(link).length > 0;
+      }
+
+      function linkHasUnmetLearningPathPrerequisite(link) {
+        if (!learningPathMode || !link) return false;
+        return linkUnmetLearningPathPrerequisitePaths(link).length > 0 ||
+          linkUnmetLearningPathCheckIds(link).length > 0;
       }
 
       function syncLearningPathGateLinks() {
@@ -2919,6 +2932,31 @@
         return null;
       }
 
+      function findLearningPathPrerequisiteCallout(paths) {
+        if (!paths.length) return null;
+        var callouts = document.querySelectorAll('[data-learning-path-prerequisite-callout]');
+        for (var index = 0; index < callouts.length; index++) {
+          var describedPaths = (callouts[index].getAttribute('data-prerequisite-paths') || '').split(/\s+/).filter(Boolean);
+          if (paths.some(function (path) { return describedPaths.indexOf(path) >= 0; })) return callouts[index];
+        }
+        return null;
+      }
+
+      function ensureLearningPathPrerequisiteCallout(link) {
+        var paths = linkUnmetLearningPathPrerequisitePaths(link);
+        var callout = findLearningPathPrerequisiteCallout(paths);
+        if (callout || !paths.length) return callout;
+        var panel = document.getElementById('continuePathPanel') || document.getElementById('learningPathPanel');
+        if (!panel) return null;
+        var wrapper = document.createElement('div');
+        wrapper.innerHTML = learningPathPrerequisiteCallout({ prerequisitePaths: paths }, 'Required before this lesson');
+        callout = wrapper.firstElementChild;
+        if (!callout) return null;
+        var body = panel.querySelector('.continue-panel') || panel;
+        body.appendChild(callout);
+        return callout;
+      }
+
       function initLearningPathGateNavigation() {
         document.addEventListener('click', function (event) {
           var link = event.target && event.target.closest ? event.target.closest('a[data-learning-path-gate]') : null;
@@ -2926,9 +2964,11 @@
           event.preventDefault();
           var firstId = linkUnmetLearningPathCheckIds(link)[0] || '';
           var button = findLearningPathConfirmButton(firstId);
-          if (button) {
-            button.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
-            button.focus();
+          var pathCallout = button ? null : ensureLearningPathPrerequisiteCallout(link);
+          var feedbackTarget = button || pathCallout;
+          if (feedbackTarget) {
+            feedbackTarget.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
+            feedbackTarget.focus();
           }
         });
       }
@@ -5590,6 +5630,7 @@
           var focusedLessons = flatLessons.filter(function (item) { return item.required !== false; });
           var focusedOptionalLessons = flatLessons.filter(function (item) { return item.required === false; });
           var focusedIndex = focusedLessons.findIndex(function (item) { return item.path === lessonPath; });
+          var focusedEntry = flatLessons.find(function (item) { return item.path === lessonPath; }) || null;
           var focusedDone = 0;
           for (var fp = 0; fp < focusedLessons.length; fp++) {
             if (window.AIFSProgress && window.AIFSProgress.isLessonComplete(focusedLessons[fp].path)) focusedDone++;
@@ -5630,8 +5671,8 @@
           if (focusedChecks.length) focusedHtml += ' ' + focusedChecksDone + ' of ' + focusedChecks.length + ' knowledge preflights confirmed.';
           focusedHtml += '</div>';
           focusedHtml += '<div class="path-panel-tail">';
-          if (focusedIndex >= 0) {
-            focusedHtml += learningPathPrerequisiteCallout(focusedLessons[focusedIndex], 'Required before this lesson');
+          if (focusedEntry) {
+            focusedHtml += learningPathPrerequisiteCallout(focusedEntry, 'Required before this lesson');
           }
           var nextRequired = focusedIndex >= 0 && focusedIndex < focusedLessons.length - 1
             ? focusedLessons[focusedIndex + 1]
@@ -5641,8 +5682,10 @@
           } else {
             focusedHtml += '<div class="path-completion-actions">';
             for (var focusedOptionalIndex = 0; focusedOptionalIndex < focusedOptionalLessons.length; focusedOptionalIndex++) {
-              if (focusedOptionalLessons[focusedOptionalIndex].path === lessonPath) continue;
-              focusedHtml += '<a href="' + learningPathLessonHref(focusedOptionalLessons[focusedOptionalIndex].path) + '">Optional capstone: ' + escapeHtml(focusedOptionalLessons[focusedOptionalIndex].lessonName) + '</a>';
+              var focusedOptionalLesson = focusedOptionalLessons[focusedOptionalIndex];
+              if (focusedOptionalLesson.path === lessonPath) continue;
+              var focusedOptionalLocked = learningPathEntryLocked(focusedOptionalLesson);
+              focusedHtml += '<a class="path-completion-link' + learningPathGateClass(focusedOptionalLesson) + '" href="' + learningPathLessonHref(focusedOptionalLesson.path) + '"' + learningPathGateAttributes(focusedOptionalLesson) + '>' + (focusedOptionalLocked ? 'Locked optional capstone: ' : 'Optional capstone: ') + escapeHtml(focusedOptionalLesson.lessonName) + '</a>';
             }
             if (focusedLessons.length) focusedHtml += '<a href="' + learningPathLessonHref(focusedLessons[0].path) + '">Restart path</a>';
             focusedHtml += '<a href="catalog.html">Full course catalog</a></div>';

@@ -45,9 +45,10 @@ class McpServerTests(unittest.TestCase):
             text=True,
             check=True,
         ).stdout.strip()
-        major = int(version.removeprefix("v").split(".", 1)[0])
-        if major < 22:
-            self.skipTest("Node.js 22+ is required for TypeScript strip mode")
+        version_parts = version.removeprefix("v").split("-", 1)[0].split(".")
+        node_version = tuple(int(part) for part in version_parts[:3])
+        if len(node_version) < 3 or node_version < (22, 6, 0):
+            self.skipTest("Node.js 22.6.0+ is required for TypeScript strip mode")
 
         accepted = [-(2**53 - 1), 2**53 - 1]
         rejected = [-(2**53), 2**53, 1.5, True]
@@ -68,6 +69,7 @@ class McpServerTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         responses = [json.loads(line) for line in completed.stdout.splitlines()]
+        self.assertEqual(len(responses), len(messages), completed.stderr or completed.stdout)
         self.assertEqual([response["id"] for response in responses[:2]], accepted)
         for response in responses[2:]:
             self.assertIsNone(response["id"])

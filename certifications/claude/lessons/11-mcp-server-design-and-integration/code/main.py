@@ -138,15 +138,23 @@ class MCPServer:
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         if not isinstance(request, dict):
             return self._error(None, -32600, "Invalid Request"), []
-        if request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
-            return self._error(request.get("id"), -32600, "Invalid Request"), []
+        valid_envelope = request.get("jsonrpc") == "2.0" and isinstance(
+            request.get("method"), str
+        )
         if "id" not in request:
-            return None, []
+            params_are_structured = "params" not in request or isinstance(
+                request["params"], (dict, list)
+            )
+            if valid_envelope and params_are_structured:
+                return None, []
+            return self._error(None, -32600, "Invalid Request"), []
         request_id = request.get("id")
         if request_id is None or isinstance(request_id, bool) or not isinstance(
             request_id, (str, int)
         ):
             return self._error(None, -32600, "Invalid Request"), []
+        if not valid_envelope:
+            return self._error(request_id, -32600, "Invalid Request"), []
 
         params = request.get("params", {})
         try:

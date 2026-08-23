@@ -30,6 +30,7 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -181,12 +182,14 @@ def discover_artifacts() -> Iterable[Artifact]:
     for output_dir in output_dirs:
         paths = sorted(output_dir.iterdir())
         for bundle_root in paths:
-            skill_path = bundle_root / "SKILL.md"
+            if not bundle_root.is_dir():
+                continue
             if bundle_root.is_symlink():
                 raise UnsafeBundleError(
                     f"skill bundle must be a regular directory: {bundle_root}"
                 )
-            if not bundle_root.is_dir() or not skill_path.exists():
+            skill_path = bundle_root / "SKILL.md"
+            if not skill_path.exists():
                 continue
             bundle_files = validate_bundle(bundle_root)
             artifact = artifact_from_markdown(
@@ -251,6 +254,7 @@ def target_path(artifact: Artifact, target_root: Path, layout: str) -> Path:
 class Plan:
     actions: list[tuple[Artifact, Path]] = field(default_factory=list)
     collisions: list[Path] = field(default_factory=list)
+    target_root: Path | None = None
 
 
 def target_identity(artifact: Artifact, target_root: Path, layout: str) -> Path:
@@ -267,7 +271,7 @@ def target_identity(artifact: Artifact, target_root: Path, layout: str) -> Path:
 def build_plan(
     artifacts: list[Artifact], target_root: Path, layout: str, force: bool
 ) -> Plan:
-    plan = Plan()
+    plan = Plan(target_root=target_root)
     seen_targets: dict[Path, Artifact] = {}
     for a in artifacts:
         dest = target_path(a, target_root, layout)
@@ -314,8 +318,188 @@ def validate_bundle(bundle_root: Path) -> list[str]:
         raise UnsafeBundleError(str(error)) from error
 
 
+def _require_safe_open_flags() -> None:
+    if not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_DIRECTORY", 0):
+        raise UnsafeArtifactError(
+            "this platform does not support race-safe artifact installation"
+        )
+
+
+def _same_file(expected: os.stat_result, actual: os.stat_result) -> bool:
+    return (expected.st_dev, expected.st_ino) == (actual.st_dev, actual.st_ino)
+
+
+def _open_bundle_directory(
+    directory_fd: int | None,
+    name: str | Path,
+    expected: os.stat_result,
+    display_path: Path,
+) -> tuple[int, os.stat_result]:
+    if not stat.S_ISDIR(expected.st_mode):
+        raise UnsafeBundleError(
+            f"skill bundle contains an unsafe directory entry: {display_path}"
+        )
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            dir_fd=directory_fd,
+        )
+    except OSError as error:
+        raise UnsafeBundleError(
+            f"skill bundle contains an unsafe directory entry: {display_path}"
+        ) from error
+    actual = os.fstat(descriptor)
+    if not stat.S_ISDIR(actual.st_mode) or not _same_file(expected, actual):
+        os.close(descriptor)
+        raise UnsafeBundleError(
+            f"skill bundle contains an unsafe directory entry: {display_path}"
+        )
+    return descriptor, actual
+
+
+def _open_bundle_file(
+    directory_fd: int,
+    name: str,
+    expected: os.stat_result,
+    display_path: Path,
+) -> tuple[int, os.stat_result]:
+    if not stat.S_ISREG(expected.st_mode):
+        raise UnsafeBundleError(
+            f"skill bundle contains an unsafe file entry: {display_path}"
+        )
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_NOFOLLOW,
+            dir_fd=directory_fd,
+        )
+    except OSError as error:
+        raise UnsafeBundleError(
+            f"skill bundle contains an unsafe file entry: {display_path}"
+        ) from error
+    actual = os.fstat(descriptor)
+    if not stat.S_ISREG(actual.st_mode) or not _same_file(expected, actual):
+        os.close(descriptor)
+        raise UnsafeBundleError(
+            f"skill bundle contains an unsafe file entry: {display_path}"
+        )
+    return descriptor, actual
+
+
+def _copy_bundle_directory(
+    source_fd: int,
+    destination: Path,
+    source_path: Path,
+) -> None:
+    for name in sorted(os.listdir(source_fd)):
+        display_path = source_path / name
+        try:
+            expected = os.stat(name, dir_fd=source_fd, follow_symlinks=False)
+        except OSError as error:
+            raise UnsafeBundleError(
+                f"could not inspect skill bundle entry: {display_path}"
+            ) from error
+        target = destination / name
+        if stat.S_ISDIR(expected.st_mode):
+            child_fd, actual = _open_bundle_directory(
+                source_fd, name, expected, display_path
+            )
+            try:
+                target.mkdir()
+                _copy_bundle_directory(child_fd, target, display_path)
+                target.chmod(stat.S_IMODE(actual.st_mode))
+            finally:
+                os.close(child_fd)
+            continue
+        if stat.S_ISREG(expected.st_mode):
+            file_fd, actual = _open_bundle_file(
+                source_fd, name, expected, display_path
+            )
+            try:
+                with os.fdopen(file_fd, "rb") as source_handle, target.open(
+                    "xb"
+                ) as target_handle:
+                    shutil.copyfileobj(source_handle, target_handle)
+            except Exception:
+                if target.exists():
+                    target.unlink()
+                raise
+            target.chmod(stat.S_IMODE(actual.st_mode))
+            continue
+        raise UnsafeBundleError(
+            f"skill bundle contains an unsafe file entry: {display_path}"
+        )
+
+
+def _copy_bundle_no_follow(bundle_root: Path, staged_bundle: Path) -> None:
+    _require_safe_open_flags()
+    try:
+        expected = os.stat(bundle_root, follow_symlinks=False)
+    except OSError as error:
+        raise UnsafeBundleError(
+            f"skill bundle must be a regular directory: {bundle_root}"
+        ) from error
+    source_fd, actual = _open_bundle_directory(
+        None, bundle_root, expected, bundle_root
+    )
+    try:
+        staged_bundle.mkdir()
+        _copy_bundle_directory(source_fd, staged_bundle, bundle_root)
+        staged_bundle.chmod(stat.S_IMODE(actual.st_mode))
+    finally:
+        os.close(source_fd)
+
+
+def _open_flat_artifact(
+    source: Path, expected: os.stat_result
+) -> tuple[int, os.stat_result]:
+    if not stat.S_ISREG(expected.st_mode):
+        raise UnsafeArtifactError(f"flat artifact must be a regular file: {source}")
+    try:
+        descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise UnsafeArtifactError(
+            f"flat artifact must be a regular file: {source}"
+        ) from error
+    actual = os.fstat(descriptor)
+    if not stat.S_ISREG(actual.st_mode) or not _same_file(expected, actual):
+        os.close(descriptor)
+        raise UnsafeArtifactError(f"flat artifact changed during installation: {source}")
+    return descriptor, actual
+
+
+def _ensure_safe_target_root(target_root: Path) -> None:
+    target_root.mkdir(parents=True, exist_ok=True)
+    if target_root.is_symlink() or not target_root.is_dir():
+        raise UnsafeArtifactError(
+            f"installation target must be a regular directory: {target_root}"
+        )
+
+
+def _ensure_safe_destination_parent(target_root: Path, parent: Path) -> None:
+    _ensure_safe_target_root(target_root)
+    try:
+        relative = parent.relative_to(target_root)
+    except ValueError as error:
+        raise UnsafeArtifactError(
+            f"artifact target escapes the installation directory: {parent}"
+        ) from error
+    current = target_root
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            raise UnsafeArtifactError(
+                f"artifact destination parent must be a regular directory: {current}"
+            )
+        current.mkdir(exist_ok=True)
+        if current.is_symlink() or not current.is_dir():
+            raise UnsafeArtifactError(
+                f"artifact destination parent must be a regular directory: {current}"
+            )
+
+
 def install_bundle(bundle_root: Path, dest: Path, force: bool) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
     staging_root = Path(
         tempfile.mkdtemp(prefix=f".{dest.name}.install-", dir=dest.parent)
     )
@@ -323,12 +507,7 @@ def install_bundle(bundle_root: Path, dest: Path, force: bool) -> None:
     backup_root: Path | None = None
     backup: Path | None = None
     try:
-        shutil.copytree(
-            bundle_root,
-            staged_bundle,
-            copy_function=shutil.copy2,
-            symlinks=True,
-        )
+        _copy_bundle_no_follow(bundle_root, staged_bundle)
         try:
             validate_skill_bundle(staged_bundle, staging_root)
         except BundleValidationError as error:
@@ -360,23 +539,54 @@ def install_bundle(bundle_root: Path, dest: Path, force: bool) -> None:
             shutil.rmtree(backup_root, ignore_errors=True)
 
 
+def install_flat_artifact(source: Path, dest: Path, force: bool) -> None:
+    _require_safe_open_flags()
+    try:
+        expected = os.stat(source, follow_symlinks=False)
+    except OSError as error:
+        raise UnsafeArtifactError(
+            f"flat artifact must be a regular file: {source}"
+        ) from error
+    source_fd, actual = _open_flat_artifact(source, expected)
+    staging_fd, staging_name = tempfile.mkstemp(
+        prefix=f".{dest.name}.install-", dir=dest.parent
+    )
+    staging_path = Path(staging_name)
+    try:
+        with os.fdopen(source_fd, "rb") as source_handle, os.fdopen(
+            staging_fd, "wb"
+        ) as target_handle:
+            shutil.copyfileobj(source_handle, target_handle)
+            target_handle.flush()
+            os.fsync(target_handle.fileno())
+        staging_path.chmod(stat.S_IMODE(actual.st_mode))
+        if (dest.exists() or dest.is_symlink()) and not force:
+            raise FileExistsError(f"target already exists: {dest}")
+        os.replace(staging_path, dest)
+    finally:
+        if staging_path.exists() or staging_path.is_symlink():
+            staging_path.unlink()
+
+
 def apply_plan(plan: Plan, force: bool = False) -> None:
     for artifact, _dest in plan.actions:
         if artifact.bundle_root is not None:
             artifact.bundle_files = validate_bundle(artifact.bundle_root)
         else:
             validate_flat_artifact(artifact.source)
+    if plan.actions and plan.target_root is None:
+        raise ValueError("installation plan is missing its target root")
     for artifact, dest in plan.actions:
+        _ensure_safe_destination_parent(plan.target_root, dest.parent)
         if artifact.bundle_root is not None:
             install_bundle(artifact.bundle_root, dest, force)
         else:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(artifact.source, dest)
+            install_flat_artifact(artifact.source, dest, force)
 
 
 def write_manifest(target_root: Path, artifacts: list[Artifact], layout: str) -> Path:
     manifest_path = target_root / "manifest.json"
-    target_root.mkdir(parents=True, exist_ok=True)
+    _ensure_safe_target_root(target_root)
     by_type: dict[str, int] = {}
     by_phase: dict[str, int] = {}
     entries = []
@@ -396,10 +606,20 @@ def write_manifest(target_root: Path, artifacts: list[Artifact], layout: str) ->
         },
         "artifacts": entries,
     }
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    descriptor, staging_name = tempfile.mkstemp(
+        prefix=".manifest.json.install-", dir=target_root
     )
+    staging_path = Path(staging_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        staging_path.chmod(0o644)
+        os.replace(staging_path, manifest_path)
+    finally:
+        if staging_path.exists() or staging_path.is_symlink():
+            staging_path.unlink()
     return manifest_path
 
 

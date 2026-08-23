@@ -863,6 +863,38 @@ test('repository Agent Skills path routes 22 to 24 and keeps 23 optional', () =>
   assert.equal(Object.hasOwn(poisoningPreflight, 'path'), false);
 });
 
+test('optional MCP capstone keeps its prerequisite gate in every lesson reader surface', () => {
+  const root = path.resolve(__dirname, '..');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'learning-paths', 'model-context-protocol.json'), 'utf8'));
+  const capstone = manifest.optionalLessons.find(entry => entry.lesson === 23);
+  const completedPaths = new Set();
+  const progress = loadLearningPathProgressRuntime(createMemoryStorage());
+  const isLessonComplete = lessonPath => completedPaths.has(lessonPath);
+
+  assert.ok(capstone);
+  assert.equal(capstone.required, false);
+  assert.deepEqual(capstone.prerequisitePaths, [
+    'phases/13-tools-and-protocols/19-a2a-protocol',
+    'phases/13-tools-and-protocols/20-opentelemetry-genai',
+  ]);
+  assert.equal(progress.canEnter(manifest, capstone, isLessonComplete), false);
+  assert.deepEqual(Array.from(progress.unmetPaths(capstone, isLessonComplete)), capstone.prerequisitePaths);
+  completedPaths.add(capstone.prerequisitePaths[0]);
+  assert.equal(progress.canEnter(manifest, capstone, isLessonComplete), false);
+  completedPaths.add(capstone.prerequisitePaths[1]);
+  assert.equal(progress.canEnter(manifest, capstone, isLessonComplete), true);
+
+  const lessonHtml = fs.readFileSync(path.join(__dirname, 'lesson.html'), 'utf8');
+  assert.match(lessonHtml, /var focusedEntry = flatLessons\.find\(function \(item\) \{ return item\.path === lessonPath; \}\) \|\| null/);
+  assert.match(lessonHtml, /learningPathPrerequisiteCallout\(focusedEntry, 'Required before this lesson'\)/);
+  assert.match(lessonHtml, /var focusedOptionalLocked = learningPathEntryLocked\(focusedOptionalLesson\)/);
+  assert.match(
+    lessonHtml,
+    /class="path-completion-link' \+ learningPathGateClass\(focusedOptionalLesson\)[\s\S]{0,300}learningPathGateAttributes\(focusedOptionalLesson\)/
+  );
+  assert.match(lessonHtml, /focusedOptionalLocked \? 'Locked optional capstone: ' : 'Optional capstone: '/);
+});
+
 test('Agent Skills knowledge preflight persists per path and gates Lesson 26 deterministically', () => {
   const root = path.resolve(__dirname, '..');
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'learning-paths', 'agent-skills.json'), 'utf8'));
@@ -914,10 +946,18 @@ test('learning path navigation selects the first actually unmet knowledge check'
   assert.equal(progress.firstUnmetCheckId(manifest, lesson), 'second');
 });
 
-test('generic course skills route unambiguous state and stop on multi-route ambiguity', () => {
+test('generic course skills dispatch every supported state to an installed owner', () => {
   const root = path.resolve(__dirname, '..');
+  const routeOwners = [
+    ['LEARNING.md', 'learn'],
+    ['MCP-LEARNING.md', 'learn-mcp'],
+    ['AGENT-SKILLS-LEARNING.md', 'learn-agent-skills'],
+    ['CLAUDE-CERTIFICATION.md', 'claude-certification'],
+  ];
+
   for (const name of ['learn', 'start-learning']) {
     const source = fs.readFileSync(path.join(root, 'skills', name, 'SKILL.md'), 'utf8');
+    const mirror = fs.readFileSync(path.join(root, '.claude', 'skills', name, 'SKILL.md'), 'utf8');
     const section = source.match(/## Focused Agent Skills handoff\s+([\s\S]*?)(?=\n## |$)/);
     assert.ok(section, `${name} is missing the focused Agent Skills handoff`);
     assert.match(section[1], /AGENT-SKILLS-LEARNING\.md/);
@@ -925,20 +965,52 @@ test('generic course skills route unambiguous state and stop on multi-route ambi
     assert.match(section[1], /do not\s+(?:copy Agent Skills state into|create)\s+`LEARNING\.md`/);
     const resume = source.match(/## Resume routing across course modes\s+([\s\S]*?)(?=\n## |$)/);
     assert.ok(resume, `${name} is missing cross-route resume handling`);
-    for (const stateFile of [
-      'LEARNING.md',
-      'MCP-LEARNING.md',
-      'MCP-ENGINEERING-LEARNING.md',
-      'AGENT-SKILLS-LEARNING.md',
-      'CLAUDE-CERTIFICATION.md',
-    ]) {
-      assert.ok(resume[1].includes('`' + stateFile + '`'), `${name} omits ${stateFile}`);
+    for (const [stateFile, owner] of routeOwners) {
+      assert.match(
+        resume[1],
+        new RegExp('`' + stateFile.replace('.', '\\.') + '` belongs to `' + owner + '`'),
+        `${name} does not dispatch ${stateFile} to ${owner}`
+      );
+      assert.ok(fs.existsSync(path.join(root, 'skills', owner, 'SKILL.md')), `${owner} is not installed`);
+      assert.ok(fs.existsSync(path.join(root, '.claude', 'skills', owner, 'SKILL.md')), `${owner} mirror is not installed`);
     }
-    assert.match(resume[1], /group the files by route owner/);
-    assert.match(resume[1], /exactly one route is\s+represented, resume its owner/);
-    assert.match(resume[1], /The two MCP filenames still represent one route/);
-    assert.match(resume[1], /If two\s+or more distinct routes are represented/);
-    assert.match(resume[1], /ask which one to resume/);
+    assert.match(
+      resume[1],
+      /`MCP-ENGINEERING-LEARNING\.md` is the legacy filename[\s\S]*?`learn-mcp` route, not a separate route/
+    );
+    assert.match(resume[1], /names a route[\s\S]*?(?:use|dispatch to)\s+its\s+owner[\s\S]*?even when other state files exist/);
+    assert.match(resume[1], /(?:group the files by route owner|collect the owners whose state files\s+exist)/);
+    assert.match(resume[1], /If exactly one route(?:\s+owner)?\s+(?:is\s+represented|remains)[\s\S]*?(?:resume|invoke)\s+(?:its\s+owner|it|that\s+owner)/);
+    assert.match(resume[1], /If two\s+or more\s+(?:distinct\s+routes\s+are\s+represented|route\s+owners\s+remain)/);
+    assert.match(resume[1], /ask which\s+(?:one|route)\s+to\s+resume/);
+    assert.match(source, /Legacy runtimes[\s\S]*?`learn-mcp-engineering` as an alias[\s\S]*?`learn-mcp`/);
+    assert.match(source, /learning-paths\/model-context-protocol\.json/);
+    assert.doesNotMatch(source, /learning-paths\/mcp-engineering\.json/);
+    assert.equal(source, mirror, `${name} skill mirrors diverged`);
+
+    const genericStart = name === 'learn'
+      ? source.indexOf('## Step 0')
+      : source.indexOf('If `LEARNING.md` already exists');
+    assert.ok(source.indexOf('## Resume routing across course modes') < genericStart);
+  }
+
+  assert.ok(fs.existsSync(path.join(root, 'learning-paths', 'model-context-protocol.json')));
+  assert.ok(fs.existsSync(path.join(root, 'learning-paths', 'agent-skills.json')));
+  assert.equal(fs.existsSync(path.join(root, 'learning-paths', 'mcp-engineering.json')), false);
+  assert.equal(fs.existsSync(path.join(root, 'skills', 'learn-mcp-engineering')), false);
+});
+
+test('course guide shape count matches its six routing bullets in both mirrors', () => {
+  const root = path.resolve(__dirname, '..');
+  for (const file of [
+    path.join(root, 'skills', 'course-guide', 'SKILL.md'),
+    path.join(root, '.claude', 'skills', 'course-guide', 'SKILL.md'),
+  ]) {
+    const source = fs.readFileSync(file, 'utf8');
+    const routing = source.match(/1\. \*\*Interpret the ask\*\*[\s\S]*?(?=\n2\. \*\*Scan the Contents tables\*\*)/);
+    assert.ok(routing, `${file} is missing the routing-shape section`);
+    assert.match(routing[0], /one of six shapes/);
+    assert.equal(Array.from(routing[0].matchAll(/^\s+- \*[^*]+\*/gm)).length, 6);
   }
 });
 
@@ -1171,6 +1243,12 @@ test('lesson reader keeps learning-path context and renders a copyable full-dept
   assert.match(lessonHtml, /data-prerequisite-paths/);
   assert.match(lessonHtml, /learningPathEntryLocked/);
   assert.match(lessonHtml, /firstId = linkUnmetLearningPathCheckIds\(link\)\[0\]/);
+  assert.match(lessonHtml, /data-learning-path-prerequisite-callout="true"/);
+  assert.match(lessonHtml, /function linkUnmetLearningPathPrerequisitePaths\(link\)/);
+  assert.match(lessonHtml, /function ensureLearningPathPrerequisiteCallout\(link\)/);
+  assert.match(lessonHtml, /var pathCallout = button \? null : ensureLearningPathPrerequisiteCallout\(link\)/);
+  assert.match(lessonHtml, /feedbackTarget\.scrollIntoView/);
+  assert.match(lessonHtml, /feedbackTarget\.focus\(\)/);
   assert.match(lessonHtml, /var nextLocked = learningPathMode && learningPathEntryLocked\(next\)/);
   assert.match(
     lessonHtml,

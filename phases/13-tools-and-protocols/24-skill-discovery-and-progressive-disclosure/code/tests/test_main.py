@@ -242,6 +242,14 @@ Body
         with self.assertRaises(ReferencePathError):
             validate_reference(root / "reporter", "../secret.md")
 
+    def test_rejects_non_string_reference_with_domain_error(self) -> None:
+        root = self.base / "scope"
+        write_skill(root, "reporter")
+        for reference in (None, 1, [], {}):
+            with self.subTest(reference=reference):
+                with self.assertRaisesRegex(ReferencePathError, "must be a string"):
+                    validate_reference(root / "reporter", reference)
+
     def test_rejects_deep_reference_chain(self) -> None:
         root = self.base / "scope"
         write_skill(root, "reporter")

@@ -300,6 +300,8 @@ def load_skill_body(
 
 def validate_reference(skill_directory: Path, reference: str) -> Path:
     """Allow a direct file or one subdirectory, never traversal or deep chains."""
+    if not isinstance(reference, str):
+        raise ReferencePathError("reference must be a string")
     if "\\" in reference:
         raise ReferencePathError("references must use portable forward slashes")
     relative = PurePosixPath(reference)

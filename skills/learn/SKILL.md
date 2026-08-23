@@ -48,8 +48,8 @@ https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/<pat
 
 ## Resume routing across course modes
 
-Before resolving an unnamed "resume" or "continue" request, inspect every
-supported state file in the current directory:
+Before Step 0, resolve every "resume" or "continue" request against these
+supported state files and their route owners:
 
 - `LEARNING.md` belongs to `learn` for the full curriculum.
 - `MCP-LEARNING.md` belongs to `learn-mcp` for the Model Context Protocol
@@ -59,14 +59,18 @@ supported state file in the current directory:
 - `AGENT-SKILLS-LEARNING.md` belongs to `learn-agent-skills`.
 - `CLAUDE-CERTIFICATION.md` belongs to `claude-certification`.
 
-If the learner names a route, use its owner even when other state files exist.
-For an unnamed request, group the files by route owner. If exactly one route is
-represented, resume its owner. The two MCP filenames still represent one route;
-hand them to `learn-mcp`, which safely migrates or reports a collision. If two
-or more distinct routes are represented, list their learner-facing route names
-and ask which one to resume before selecting a lesson or changing any state.
-Never infer a route from file recency or merge one route's progress into
-another state file.
+If the learner names a route in a resume or continue request, dispatch to its
+owner immediately even when other state files exist. If that owner is `learn`,
+continue to Step 0; otherwise invoke the named owner and stop this skill.
+
+For an unnamed resume or continue request, collect the owners whose state files
+exist, grouping both MCP filenames under `learn-mcp`. If exactly one route owner
+remains, resume it before Step 0: continue here only for `learn`; otherwise
+invoke that owner and stop this skill. `learn-mcp` owns legacy-file migration
+and collision reporting. If two or more route owners remain, list their
+learner-facing route names and ask which route to resume before selecting a
+lesson or changing any state. If none exist, continue to Step 0. Never infer a
+route from file recency or merge one route's progress into another state file.
 
 Legacy runtimes may expose `learn-mcp-engineering` as an alias. Accept it only
 to reach `learn-mcp`; render every learner-facing handoff as `learn-mcp` and
@@ -77,10 +81,11 @@ name the route Model Context Protocol (MCP).
 If the learner asks for the Model Context Protocol (MCP) path, or either
 `MCP-LEARNING.md` or `MCP-ENGINEERING-LEARNING.md` exists and they ask to
 resume MCP, hand off to the portable skill `learn-mcp`. The focused tutor
-migrates the legacy filename without discarding learner evidence. Its source of truth is
-`learning-paths/model-context-protocol.json`. Do not choose the next numeric Phase 13
+migrates the legacy filename without discarding learner evidence. Its source
+of truth is `learning-paths/model-context-protocol.json`. Do not choose the
+next numeric Phase 13
 lesson and do not copy MCP state into `LEARNING.md`; the dedicated tutor owns
-the route order, wire checkpoints, and security gate.
+route order, wire checkpoints, and the security gate.
 
 ## Focused Agent Skills handoff
 

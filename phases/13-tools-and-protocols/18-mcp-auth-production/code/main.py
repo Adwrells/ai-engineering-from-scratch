@@ -121,13 +121,27 @@ def valid_web_redirect_uri(value: object) -> bool:
     return parsed is not None and parsed.scheme == "https" and parsed.hostname is not None
 
 
+def valid_private_use_scheme(scheme: str) -> bool:
+    labels = scheme.split(".")
+    return len(labels) >= 2 and all(
+        label
+        and label.isascii()
+        and label[0].isalnum()
+        and label[-1].isalnum()
+        and all(character.isalnum() or character == "-" for character in label)
+        for label in labels
+    )
+
+
 def valid_native_redirect_uri(value: object) -> bool:
     parsed = parsed_absolute_redirect_uri(value)
     if parsed is None:
         return False
+    if parsed.scheme == "https":
+        return parsed.hostname is not None
     if parsed.scheme == "http":
         return parsed.hostname in {"localhost", "127.0.0.1", "::1"}
-    return True
+    return valid_private_use_scheme(parsed.scheme)
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +222,7 @@ class AuthorizationServer:
         application_type = document.get("application_type")
         if application_type is not None and application_type not in {"native", "web"}:
             raise ValueError("CIMD application_type, when present, must be native or web")
+        redirect_application_type = application_type or "native"
         redirect_uris = document.get("redirect_uris", [])
         if (
             not isinstance(redirect_uris, list)
@@ -217,18 +232,19 @@ class AuthorizationServer:
             raise ValueError(
                 "CIMD requires absolute redirect URIs without fragments"
             )
-        if application_type == "web" and any(
+        if redirect_application_type == "web" and any(
             not valid_web_redirect_uri(uri) for uri in redirect_uris
         ):
             raise ValueError(
                 "CIMD web clients require absolute HTTPS redirect URIs "
                 "with a host and no fragment"
             )
-        if application_type == "native" and any(
+        if redirect_application_type == "native" and any(
             not valid_native_redirect_uri(uri) for uri in redirect_uris
         ):
             raise ValueError(
-                "CIMD native clients require HTTPS, a loopback HTTP URI, or a custom scheme"
+                "CIMD native clients require HTTPS, a loopback HTTP URI, or a "
+                "domain-based private-use scheme"
             )
         self.clients[document_url] = {
             "redirect_uris": redirect_uris,
@@ -293,13 +309,37 @@ class AuthorizationServer:
         *,
         redirect_uris: list[str],
         client_name: str,
+        application_type: str = "native",
     ) -> str:
         if not client_id or not redirect_uris or not client_name.strip():
             raise ValueError("pre-registration requires client_id, client_name, and redirect_uris")
+        if application_type not in {"native", "web"}:
+            raise ValueError("pre-registration application_type must be native or web")
+        if (
+            not isinstance(redirect_uris, list)
+            or any(parsed_absolute_redirect_uri(uri) is None for uri in redirect_uris)
+        ):
+            raise ValueError(
+                "pre-registration requires absolute redirect URIs without fragments"
+            )
+        if application_type == "web" and any(
+            not valid_web_redirect_uri(uri) for uri in redirect_uris
+        ):
+            raise ValueError(
+                "pre-registered web clients require absolute HTTPS redirect URIs "
+                "with a host and no fragment"
+            )
+        if application_type == "native" and any(
+            not valid_native_redirect_uri(uri) for uri in redirect_uris
+        ):
+            raise ValueError(
+                "pre-registered native clients require HTTPS redirect URIs, "
+                "loopback HTTP redirect URIs, or a domain-based private-use scheme"
+            )
         self.clients[client_id] = {
             "redirect_uris": list(redirect_uris),
             "grant_types": ["authorization_code"],
-            "application_type": None,
+            "application_type": application_type,
             "client_name": client_name,
             "enrollment": "pre_registered",
             "issued_at": time.time(),

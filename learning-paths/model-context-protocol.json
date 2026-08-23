@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "mcp-engineering",
-  "title": "MCP Engineering",
+  "id": "model-context-protocol",
+  "title": "Model Context Protocol (MCP)",
   "summary": "Build, secure, verify, and operate stateless MCP systems from JSON-RPC envelopes through conformance release gates.",
   "estimatedMinutes": 1395,
-  "stateFile": "MCP-ENGINEERING-LEARNING.md",
+  "stateFile": "MCP-LEARNING.md",
   "prerequisites": [
     {
       "type": "knowledge",
@@ -34,9 +34,9 @@
     }
   ],
   "invocation": {
-    "codex": "learn-mcp-engineering, or choose it from /skills",
-    "claudeCode": "/learn-mcp-engineering",
-    "portableFallback": "Use learn-mcp-engineering to start or resume the MCP Engineering path."
+    "codex": "learn-mcp, or choose it from /skills",
+    "claudeCode": "/learn-mcp",
+    "portableFallback": "Use learn-mcp to start or resume the Model Context Protocol (MCP) path."
   },
   "conceptualFallback": "Read the website or each lesson's docs/en.md and hand-trace the named request and response pair. Record the checkpoint as conceptual and leave runtime, transport, authorization, and deployment evidence pending until the repository and Python 3 are available.",
   "quickStart": {
@@ -314,7 +314,7 @@
         "phases/13-tools-and-protocols/19-a2a-protocol",
         "phases/13-tools-and-protocols/20-opentelemetry-genai"
       ],
-      "entryRule": "Complete the 17 required MCP Engineering lessons plus both prerequisite paths before starting this integration capstone."
+      "entryRule": "Complete the 17 required Model Context Protocol (MCP) lessons plus both prerequisite paths before starting this integration capstone."
     }
   ]
 }

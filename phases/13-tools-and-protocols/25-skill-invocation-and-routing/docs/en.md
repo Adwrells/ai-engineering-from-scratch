@@ -41,17 +41,8 @@ The portable Agent Skills specification defines the package. It does not standar
 
 ### The five invocation stages
 
-```mermaid
-stateDiagram-v2
-  [*] --> Discovered
-  Discovered --> Eligible: actor and policy allow
-  Eligible --> Selected: explicit name or routing match
-  Selected --> Activated: body enters context
-  Activated --> Executing: permitted tool or model step begins
-  Executing --> Completed: output verified
-  Discovered --> Denied: actor or policy blocks
-  Eligible --> NotSelected: routing threshold not met
-  Activated --> Blocked: capability or approval unavailable
+```figure
+skill-invocation-stages
 ```
 
 Use these words precisely:
@@ -138,14 +129,8 @@ score(s, x) = capability_match + trigger_match + context_match - exclusion_match
 
 The exact scoring may be an LLM decision rather than arithmetic. The engineering principle still holds: selection should beat a threshold and a competing skill. When evidence is weak, abstain.
 
-```mermaid
-flowchart TD
-  Q[User request] --> E[Filter by actor eligibility]
-  E --> R[Compare request with descriptions]
-  R --> M{One clear match?}
-  M -->|yes| A[Activate selected skill]
-  M -->|no, ambiguous| C[Ask or use ordinary reasoning]
-  M -->|no match| N[Do not activate]
+```figure
+skill-routing-abstention
 ```
 
 For high-impact skills, implicit routing may be inappropriate even with a strong description. Use human-only policy when the cost of a false positive exceeds the convenience of automatic selection.
@@ -191,12 +176,8 @@ The near miss shares `package` and `build` with the release skill but belongs el
 
 An invocation argument crosses several boundaries:
 
-```mermaid
-flowchart LR
-  U[User text] --> P[Host parser]
-  P --> B[Bound arguments]
-  B --> C[Skill context]
-  C --> T[Typed tool call]
+```figure
+skill-argument-boundaries
 ```
 
 At each boundary, preserve intent without treating text as code.
@@ -214,16 +195,8 @@ A product can activate a skill because its workflow already knows the task type.
 
 This removes routing uncertainty but creates a dependency on the runtime API. Keep that adapter outside the portable body:
 
-```mermaid
-flowchart LR
-  P[Portable bundle] --> S[SKILL.md]
-  P --> R[references]
-  P --> C[scripts]
-  H[Host adapter] --> D[discovery path]
-  H --> A[explicit activation API]
-  H --> I[invocation policy]
-  H --> B[argument binding]
-  H --> P
+```figure
+skill-host-adapter
 ```
 
 The skill should remain intelligible when opened by a different compliant client.

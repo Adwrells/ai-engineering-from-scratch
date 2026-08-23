@@ -19,6 +19,70 @@ const GLOSSARY_PATH = path.join(REPO_ROOT, 'glossary', 'terms.md');
 const OUTPUT_PATH = path.join(__dirname, 'data.js');
 const CERTIFICATIONS_PATH = path.join(REPO_ROOT, 'certifications');
 const CERTIFICATION_OUTPUT_PATH = path.join(__dirname, 'certification-data.js');
+const FIGURE_MANIFEST_OUTPUT_PATH = path.join(__dirname, 'figure-manifest.js');
+
+// Registration order is public behavior. Later providers intentionally replace
+// selected legacy figures, including figures-tools3.js -> figures-mcp.js.
+const FIGURE_PROVIDER_ORDER = [
+  'figures.js',
+  'figures-math.js',
+  'figures-ml.js',
+  'figures-dl.js',
+  'figures-vision-speech.js',
+  'figures-transformers.js',
+  'figures-genai-rl.js',
+  'figures-llms-systems.js',
+  'figures-agents-alignment.js',
+  'figures-math2.js',
+  'figures-nlp2.js',
+  'figures-llms2.js',
+  'figures-infra.js',
+  'figures-frontier.js',
+  'figures-llmeng.js',
+  'figures-multimodal.js',
+  'figures-agents2.js',
+  'figures-alignment2.js',
+  'figures-foundations2.js',
+  'figures-capstone-a.js',
+  'figures-capstone-b.js',
+  'figures-agents3.js',
+  'figures-nlp3.js',
+  'figures-cv2.js',
+  'figures-llms3.js',
+  'figures-autonomous2.js',
+  'figures-swarms2.js',
+  'figures-infra2.js',
+  'figures-systems3.js',
+  'figures-capstone-c.js',
+  'figures-capstone-d.js',
+  'figures-cv3.js',
+  'figures-speech2.js',
+  'figures-multimodal2.js',
+  'figures-tools2.js',
+  'figures-agents4.js',
+  'figures-swarms3.js',
+  'figures-genai3.js',
+  'figures-misc2.js',
+  'figures-history.js',
+  'figures-capstone-e.js',
+  'figures-capstone-f.js',
+  'figures-capstone-g.js',
+  'figures-capstone-h.js',
+  'figures-capstone-i.js',
+  'figures-alignment3.js',
+  'figures-alignment4.js',
+  'figures-workbench.js',
+  'figures-tools3.js',
+  'figures-mcp.js',
+  'figures-setup.js',
+  'figures-foundations3.js',
+  'figures-visaudio4.js',
+  'figures-nlp5.js',
+  'figures-llmstack5.js',
+  'figures-autoswarm5.js',
+  'figures-infra4.js',
+  'figures-claude-certifications.js',
+];
 
 const GITHUB_BASE = 'https://github.com/rohitg00/ai-engineering-from-scratch/tree/main/';
 const SITE_ORIGIN = 'https://aiengineeringfromscratch.com';
@@ -443,6 +507,123 @@ function parseLearningPaths(repoRoot = REPO_ROOT, phases = []) {
       optionalLessons,
     };
   });
+}
+
+// ─── Resolve figure IDs to the provider scripts that register them ─────────
+// Lessons are fetched at runtime and translated lessons can retain figure
+// fences, so the browser resolves providers from the rendered data-figure IDs.
+// The build emits only IDs that are actually used by lesson Markdown.
+function collectMarkdownFiles(directory, files = []) {
+  if (!fs.existsSync(directory)) return files;
+  const entries = fs.readdirSync(directory, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    const fullPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) collectMarkdownFiles(fullPath, files);
+    else if (entry.isFile() && entry.name.endsWith('.md')) files.push(fullPath);
+  }
+  return files;
+}
+
+function discoverUsedFigureIds(repoRoot = REPO_ROOT) {
+  const ids = new Set();
+  const roots = [path.join(repoRoot, 'phases'), path.join(repoRoot, 'certifications')];
+  for (const root of roots) {
+    for (const file of collectMarkdownFiles(root, [])) {
+      const markdown = fs.readFileSync(file, 'utf8');
+      for (const match of markdown.matchAll(/```figure\s*\r?\n([\s\S]*?)```/g)) {
+        const id = match[1].trim().split(/\s+/)[0];
+        if (id) ids.add(id);
+      }
+    }
+  }
+  return [...ids].sort();
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function assetVersion(content) {
+  return crypto.createHash('sha256').update(content).digest('hex').slice(0, 12);
+}
+
+function discoverFigureProviderOrder(siteDir = __dirname, baseOrder = FIGURE_PROVIDER_ORDER) {
+  const known = new Set(baseOrder);
+  const additions = fs.readdirSync(siteDir)
+    .filter(file => /^figures(?:-[a-z0-9-]+)?\.js$/i.test(file) && !known.has(file))
+    .sort((a, b) => a.localeCompare(b));
+  return baseOrder.concat(additions);
+}
+
+function buildFigureProviderManifest(
+  repoRoot = REPO_ROOT,
+  siteDir = __dirname,
+  providerOrder
+) {
+  const resolvedProviderOrder = Array.isArray(providerOrder)
+    ? providerOrder.slice()
+    : discoverFigureProviderOrder(siteDir);
+  const providerSources = new Map();
+  const providerVersions = {};
+  for (const provider of resolvedProviderOrder) {
+    const providerPath = path.join(siteDir, provider);
+    if (!fs.existsSync(providerPath)) throw new Error(`Missing figure provider: ${provider}`);
+    const source = fs.readFileSync(providerPath, 'utf8');
+    providerSources.set(provider, source);
+    providerVersions[provider] = assetVersion(source);
+  }
+  const localSource = fs.readFileSync(path.join(siteDir, 'lesson-figures.js'), 'utf8');
+  const providersByFigure = {};
+  const unresolved = [];
+  for (const id of discoverUsedFigureIds(repoRoot)) {
+    const quotedId = new RegExp(`['"]${escapeRegExp(id)}['"]`);
+    const providers = resolvedProviderOrder.filter(provider => quotedId.test(providerSources.get(provider)));
+    if (providers.length) providersByFigure[id] = providers;
+    else if (!quotedId.test(localSource)) unresolved.push(id);
+  }
+  if (unresolved.length) {
+    throw new Error(`Figure IDs have no provider: ${unresolved.join(', ')}`);
+  }
+  return { providerOrder: resolvedProviderOrder, providerVersions, providersByFigure };
+}
+
+function syncFigureAssetVersions(siteDir, manifestSource) {
+  const lessonPath = path.join(siteDir, 'lesson.html');
+  const runtimePath = path.join(siteDir, 'lesson-figures.js');
+  if (!fs.existsSync(lessonPath) || !fs.existsSync(runtimePath)) return;
+
+  const versions = {
+    'lesson-figures.js': assetVersion(fs.readFileSync(runtimePath, 'utf8')),
+    'figure-manifest.js': assetVersion(manifestSource),
+  };
+  let html = fs.readFileSync(lessonPath, 'utf8');
+  for (const [file, version] of Object.entries(versions)) {
+    const reference = new RegExp(`(<script src="${escapeRegExp(file)})(?:\\?v=[^"]*)?("></script>)`);
+    if (!reference.test(html)) throw new Error(`lesson.html is missing the ${file} script reference`);
+    html = html.replace(reference, `$1?v=${version}$2`);
+  }
+  fs.writeFileSync(lessonPath, html, 'utf8');
+}
+
+function serializeFigureProviderManifest(manifest) {
+  return '// Auto-generated by build.js from lesson figure fences and provider registrations.\n' +
+    '// Provider order is significant: later registrations override earlier ones.\n' +
+    `window.AIFS_FIGURE_PROVIDER_ORDER = ${JSON.stringify(manifest.providerOrder, null, 2)};\n` +
+    `window.AIFS_FIGURE_PROVIDER_VERSIONS = ${JSON.stringify(manifest.providerVersions, null, 2)};\n` +
+    `window.AIFS_FIGURE_PROVIDERS = ${JSON.stringify(manifest.providersByFigure, null, 2)};\n`;
+}
+
+function writeFigureManifest(repoRoot = REPO_ROOT, siteDir = __dirname) {
+  const manifest = buildFigureProviderManifest(repoRoot, siteDir);
+  const output = serializeFigureProviderManifest(manifest);
+  const outputPath = siteDir === __dirname
+    ? FIGURE_MANIFEST_OUTPUT_PATH
+    : path.join(siteDir, 'figure-manifest.js');
+  fs.writeFileSync(outputPath, output, 'utf8');
+  syncFigureAssetVersions(siteDir, output);
+  console.log(`   wrote figure-manifest.js (${Object.keys(manifest.providersByFigure).length} routed figures)`);
+  return manifest;
 }
 
 // ─── Parse the canonical phase dependency graph from README.md ───────
@@ -1333,6 +1514,7 @@ function build() {
   console.log('📖 Reading source files...');
   writeBuildMeta();
   writeLangs();
+  writeFigureManifest();
 
   const readme = fs.readFileSync(README_PATH, 'utf8');
   const roadmap = fs.readFileSync(ROADMAP_PATH, 'utf8');
@@ -1568,9 +1750,15 @@ if (require.main === module) {
 }
 
 module.exports = {
+  FIGURE_PROVIDER_ORDER,
+  buildFigureProviderManifest,
+  discoverFigureProviderOrder,
   discoverArtifacts,
+  discoverUsedFigureIds,
   parseReadme,
   parseRoadmap,
   parseLearningPaths,
   parseFrontmatter,
+  serializeFigureProviderManifest,
+  writeFigureManifest,
 };

@@ -1038,5 +1038,26 @@ class SkillArtifactBundleTest(unittest.TestCase):
             self.assertEqual(victim.read_text(), '{"protected": true}\n')
 
 
+class TutorSkillCompatibilityTest(unittest.TestCase):
+    def test_mcp_tutor_migrates_legacy_state_and_skill_mirrors_match(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        focused = (root / "skills/learn-mcp/SKILL.md").read_text(encoding="utf-8")
+        focused_mirror = (root / ".claude/skills/learn-mcp/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        generic = (root / "skills/learn/SKILL.md").read_text(encoding="utf-8")
+        generic_mirror = (root / ".claude/skills/learn/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(focused, focused_mirror)
+        self.assertEqual(generic, generic_mirror)
+        self.assertIn("MCP-ENGINEERING-LEARNING.md", focused)
+        self.assertIn("rename the legacy file to `MCP-LEARNING.md`", focused)
+        self.assertIn("Preserve every learner note and evidence row byte for byte", focused)
+        self.assertIn("`MCP-ENGINEERING-LEARNING.md` exists", generic)
+        self.assertIn("without discarding learner evidence", generic)
+
+
 if __name__ == "__main__":
     unittest.main()

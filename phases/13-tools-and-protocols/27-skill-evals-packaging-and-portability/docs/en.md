@@ -63,14 +63,8 @@ The answers become the package architecture and the eval set.
 
 ### Separate judgment from deterministic work
 
-```mermaid
-flowchart LR
-  T[Task request] --> J1[Model: classify task and choose branch]
-  J1 --> R[Reference: load branch-specific rules]
-  R --> S[Script or tool: collect deterministic evidence]
-  S --> J2[Model: interpret evidence]
-  J2 --> A[Artifact contract]
-  A --> V[Deterministic and human verification]
+```figure
+skill-workflow-extraction
 ```
 
 Use model judgment for classification, prioritization, synthesis, and ambiguity. Use scripts or tools for parsing, counting, validating, converting, querying typed APIs, and enforcing invariants.
@@ -96,14 +90,8 @@ This order makes the prose serve a testable system instead of inventing success 
 
 ### Six eval layers
 
-```mermaid
-flowchart TB
-  L1[1. Package structure] --> L2[2. Trigger routing]
-  L2 --> L3[3. Instruction and artifact behavior]
-  L3 --> L4[4. Script correctness]
-  L4 --> L5[5. Safety and authority]
-  L5 --> L6[6. Packaging and portability]
-  L6 --> G{Release gate}
+```figure
+skill-eval-layers
 ```
 
 Each layer answers a different question. Passing one cannot substitute for another.
@@ -268,13 +256,8 @@ Record whether the control is instruction-only, tool policy, approval, sandbox, 
 
 A release test should install into a clean destination, then run validation against the installed copy.
 
-```mermaid
-flowchart LR
-  S[Source bundle] --> M[Build manifest]
-  M --> I[Install complete tree]
-  I --> H[Verify hashes and paths]
-  H --> D[Discover installed skill]
-  D --> E[Run eval smoke test]
+```figure
+skill-package-install
 ```
 
 Testing only the source tree misses installer bugs, lost executable bits, flattened references, rewritten names, and stale files left from older versions.
@@ -458,23 +441,8 @@ Store the report with the package revision and eval fixture version. A pass from
 
 Use this authoring loop for every skill revision:
 
-```mermaid
-flowchart LR
-  O[Observe real workflow] --> C[Define contract]
-  C --> P[Package procedure and helpers]
-  P --> E[Run layered evals]
-  E --> F{Failure class}
-  F -->|routing| D[Edit description or policy]
-  F -->|behavior| B[Edit body, references, or tools]
-  F -->|script| S[Fix deterministic code]
-  F -->|safety| A[Reduce authority or strengthen isolation]
-  F -->|portability| H[Add adapter, fallback, or incompatibility]
-  D --> E
-  B --> E
-  S --> E
-  A --> E
-  H --> E
-  E -->|passes gate| R[Release complete bundle]
+```figure
+skill-authoring-loop
 ```
 
 Change the layer responsible for the failure. Do not stuff more words into `SKILL.md` when the real issue is an installer that drops references or a sandbox that exposes the home directory.

@@ -49,17 +49,8 @@ Activation normally places instructions in model-visible context. Those instruct
 - approve a consequential action;
 - prove a result correct.
 
-```mermaid
-flowchart LR
-  S[Activated skill] --> M[Model proposes action]
-  M --> C[Capability registry]
-  C --> P[Permission policy]
-  P --> A{Approval needed?}
-  A -->|yes, granted| X[Isolated executor]
-  A -->|no| X
-  A -->|denied| D[Stop and report]
-  X --> O[Observation]
-  O --> V[Verification gate]
+```figure
+skill-authority-chain
 ```
 
 Every box is independently configurable. Removing one weakens a different property.
@@ -96,18 +87,8 @@ An issue, webpage, document, image, repository file, or tool result contains ins
 
 A path calculation escapes the workspace, a glob matches too much, a retry duplicates a write, or a cleanup step deletes the wrong generated directory. Intent is irrelevant to impact.
 
-```mermaid
-flowchart TB
-  P[Skill package] --> I[Model instructions]
-  R[References and assets] --> I
-  U[Untrusted task content] --> I
-  I --> Q[Requested actions]
-  SC[Scripts and dependencies] --> Q
-  Q --> H[Host tools and executor]
-  H --> F[Files]
-  H --> N[Network]
-  H --> E[Environment and credentials]
-  H --> X[External side effects]
+```figure
+skill-trust-surface
 ```
 
 Draw this graph for each high-impact skill. Mark who controls every edge and which boundary validates it.
@@ -246,17 +227,8 @@ An HTTPS origin is the scheme, host, and effective port. `https://api.example.te
 
 Use approval for actions whose authority cannot be safely delegated in advance.
 
-```mermaid
-flowchart TD
-  A[Proposed action] --> R{Reversible and local?}
-  R -->|yes| S{Inside pre-approved scope?}
-  S -->|yes| E[Execute in sandbox]
-  S -->|no| P[Ask for scoped approval]
-  R -->|no| H{External, destructive, costly, or sensitive?}
-  H -->|yes| P
-  H -->|no| E
-  P -->|granted| E
-  P -->|denied| D[Stop]
+```figure
+skill-approval-decision
 ```
 
 Approval must show the actual target and consequence. "Allow bash?" is weak. "Allow the reviewed `publish_release` tool to publish version 2.4.0 to the staging registry?" is actionable.

@@ -26,7 +26,8 @@
       '.mcp-lab__control-label{font-family:var(--font-mono,monospace);font-size:.72rem;line-height:1.4;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute,#777)}',
       '.mcp-lab__scenarios,.mcp-lab__choices,.mcp-lab__actions{display:flex;flex-wrap:wrap;gap:8px}',
       '.mcp-lab button{min-height:40px;padding:8px 12px;border:1px solid var(--rule-soft,#ddd);background:var(--bg,#fafaf5);color:var(--ink,#1a1a1a);font-family:var(--font-mono,monospace);font-size:.76rem;line-height:1.35;text-align:left;cursor:pointer}',
-      '.mcp-lab__scenario,.mcp-lab__choice,.mcp-lab__action,.mcp-lab__stage{transition:transform 250ms var(--ease-in-out),opacity 180ms var(--ease-out),border-color 180ms ease,background-color 180ms ease}',
+      '.mcp-lab__scenario,.mcp-lab__choice,.mcp-lab__action{transition:transform var(--motion-press,160ms) var(--ease-out,cubic-bezier(.23,1,.32,1)),opacity var(--motion-feedback,180ms) var(--ease-out,cubic-bezier(.23,1,.32,1)),border-color var(--motion-feedback,180ms) ease,background-color var(--motion-feedback,180ms) ease}',
+      '.mcp-lab__stage{transition:transform var(--motion-drawer,250ms) var(--ease-in-out,cubic-bezier(.77,0,.175,1)),opacity var(--motion-feedback,180ms) var(--ease-out,cubic-bezier(.23,1,.32,1)),border-color var(--motion-feedback,180ms) ease,background-color var(--motion-feedback,180ms) ease}',
       '.mcp-lab button:hover{border-color:var(--blueprint,#3553ff);background:var(--blueprint-tint,rgba(53,83,255,.08))}',
       '.mcp-lab button:active{transform:scale(.97)}',
       '.mcp-lab button:focus-visible,.mcp-lab summary:focus-visible,.mcp-lab pre:focus-visible{outline:2px solid var(--blueprint,#3553ff);outline-offset:2px}',
@@ -52,7 +53,7 @@
       '.mcp-lab__verdict{min-height:28px;font-family:var(--font-body,serif);font-size:.94rem;line-height:1.5;color:var(--ink,#1a1a1a)}',
       '.mcp-lab figcaption{padding:12px 16px;border-top:1px solid var(--rule-soft,#ddd);font-family:var(--font-body,serif);font-size:.92rem;line-height:1.5;color:var(--ink-soft,#555)}',
       '@media(max-width:640px){.mcp-lab__body{padding:12px}.mcp-lab__workspace{grid-template-columns:1fr}.mcp-lab__scenarios,.mcp-lab__choices{display:grid;grid-template-columns:1fr}.mcp-lab button{width:100%;font-size:.78rem}.mcp-lab__stage-name{font-size:.8rem}.mcp-lab__stage-detail{font-size:.88rem}.mcp-lab__result{grid-template-columns:1fr}.mcp-lab__evidence pre{font-size:.75rem!important}}',
-      '@media(prefers-reduced-motion:reduce){.mcp-lab__scenario,.mcp-lab__choice,.mcp-lab__action,.mcp-lab__stage{transition:opacity 180ms var(--ease-out),border-color 180ms ease,background-color 180ms ease!important;transform:none!important}.mcp-lab button:active{transform:none!important}}'
+      '@media(prefers-reduced-motion:reduce){.mcp-lab__scenario,.mcp-lab__choice,.mcp-lab__action,.mcp-lab__stage{transition:opacity var(--motion-feedback,180ms) var(--ease-out,cubic-bezier(.23,1,.32,1)),border-color var(--motion-feedback,180ms) ease,background-color var(--motion-feedback,180ms) ease!important;transform:none!important}.mcp-lab button:active{transform:none!important}}'
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -64,10 +65,6 @@
       if (Object.prototype.hasOwnProperty.call(source, key)) target[key] = source[key];
     }
     return target;
-  }
-
-  function clear(node) {
-    while (node.firstChild) node.removeChild(node.firstChild);
   }
 
   function pretty(value) {
@@ -206,6 +203,7 @@
     }
 
     var pipeline = el('div', { class: 'mcp-lab__pipeline', 'aria-label': 'Protocol stages' });
+    var stageViews = [];
     var evidencePre = el('pre', { tabindex: '0' });
     var evidence = el('details', { class: 'mcp-lab__evidence', open: 'open' }, [
       el('summary', {}, [spec.evidenceLabel || 'Wire evidence']),
@@ -235,6 +233,21 @@
       'data-run': runState
     }, [header, body, caption]);
 
+    function ensureStageView(index) {
+      if (stageViews[index]) return stageViews[index];
+      var name = el('div', { class: 'mcp-lab__stage-name' });
+      var detail = el('div', { class: 'mcp-lab__stage-detail' });
+      var node = el('div', {
+        class: 'mcp-lab__stage',
+        'data-step': String(index + 1),
+        'data-stage-key': String(index)
+      }, [name, detail]);
+      var view = { node: node, name: name, detail: detail };
+      stageViews[index] = view;
+      pipeline.appendChild(node);
+      return view;
+    }
+
     function render(announce) {
       var scenario = spec.scenarios[selectedScenario];
       var computed = spec.evaluate(scenario, selectedChoice);
@@ -247,19 +260,22 @@
         choiceButtons[index].button.setAttribute('aria-pressed', choiceButtons[index].value === selectedChoice ? 'true' : 'false');
       }
 
-      clear(pipeline);
       for (index = 0; index < computed.stages.length; index++) {
         var item = computed.stages[index];
         var className = 'mcp-lab__stage';
         if (item.state) className += ' is-' + item.state;
-        pipeline.appendChild(el('div', {
-          class: className,
-          'data-step': String(index + 1),
-          'aria-label': item.name + ': ' + item.detail
-        }, [
-          el('div', { class: 'mcp-lab__stage-name' }, [item.name]),
-          el('div', { class: 'mcp-lab__stage-detail' }, [item.detail])
-        ]));
+        var stageView = ensureStageView(index);
+        stageView.node.hidden = false;
+        stageView.node.className = className;
+        stageView.node.setAttribute('aria-hidden', 'false');
+        stageView.node.setAttribute('aria-label', item.name + ': ' + item.detail);
+        stageView.name.textContent = item.name;
+        stageView.detail.textContent = item.detail;
+      }
+      for (; index < stageViews.length; index++) {
+        stageViews[index].node.hidden = true;
+        stageViews[index].node.className = 'mcp-lab__stage';
+        stageViews[index].node.setAttribute('aria-hidden', 'true');
       }
 
       evidencePre.textContent = pretty(computed.evidence);

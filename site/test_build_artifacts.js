@@ -240,8 +240,9 @@ function writeMarkdown(file, { name, description, version }) {
   ].join('\n'));
 }
 
-test('shared mutable site assets use one release cache key on every page', () => {
+test('shared site asset families use the expected cache keys on every page', () => {
   const release = '20260822a';
+  const navigationRelease = '20260823b';
   const pages = [
     'about.html',
     'assessment.html',
@@ -263,9 +264,9 @@ test('shared mutable site assets use one release cache key on every page', () =>
 
   for (const page of pages) {
     const source = sourceFor(page);
-    assert.equal(versionFor(source, 'style.css'), release, `${page} has stale style.css`);
+    assert.equal(versionFor(source, 'style.css'), navigationRelease, `${page} has stale style.css`);
     assert.equal(versionFor(source, 'progress.js'), release, `${page} has stale progress.js`);
-    assert.equal(versionFor(source, 'header.js'), release, `${page} has stale header.js`);
+    assert.equal(versionFor(source, 'header.js'), navigationRelease, `${page} has stale header.js`);
   }
 
   assert.equal(versionFor(sourceFor('index.html'), 'app.js'), release);
@@ -558,10 +559,15 @@ test('homepage preserves live GitHub CTAs and the motion-aware learner marquee',
   const homepage = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
   const headerSource = fs.readFileSync(path.join(__dirname, 'header.js'), 'utf8');
   const mastheadCta = homepage.match(/<div class="masthead-cta[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<div class="masthead-install/);
+  const mastheadFigure = homepage.match(/\.masthead-figure\s*\{([\s\S]*?)\n    \}/);
+  const wideMasthead = homepage.match(/@media \(min-width: 1280px\) \{([\s\S]*?)\n    \}\n\n    @media \(min-width: 1440px\)/);
   const learnerStrip = homepage.match(/<section class="learners-strip"[\s\S]*?<\/section>/);
   const learnerStyles = homepage.match(/\/\* Learner organization index \*\/([\s\S]*?)\.masthead-install-caption/);
 
   assert.ok(mastheadCta, 'prominent masthead CTA row is missing');
+  assert.match(mastheadCta[0], /<span>Start the Course<\/span>/);
+  assert.match(mastheadCta[0], /<span>Choose Your Goal<\/span>/);
+  assert.doesNotMatch(mastheadCta[0], /Start (?:MCP Engineering|Agent Skills)/i);
   assert.match(
     mastheadCta[0],
     /<a class="masthead-btn" href="https:\/\/github\.com\/rohitg00\/ai-engineering-from-scratch"[^>]*aria-label="Star ai-engineering-from-scratch on GitHub"[^>]*>[\s\S]*?<span>Star on GitHub<\/span>[\s\S]*?<span class="masthead-btn-count" data-gh-stars="rohitg00\/ai-engineering-from-scratch" data-loading="true">/
@@ -574,6 +580,18 @@ test('homepage preserves live GitHub CTAs and the motion-aware learner marquee',
   assert.match(headerSource, /\[data-gh-stars="' \+ REPO \+ '"\]/);
   assert.match(headerSource, /fetch\('https:\/\/api\.github\.com\/repos\/' \+ REPO/);
   assert.match(headerSource, /var n = data\.stargazers_count;[\s\S]*?paint\(n\)/);
+
+  assert.ok(mastheadFigure, 'contained masthead figure rule is missing');
+  assert.match(mastheadFigure[0], /width: 100%/);
+  assert.match(mastheadFigure[0], /max-width: 430px/);
+  assert.doesNotMatch(mastheadFigure[0], /position:\s*absolute|right:\s*-/);
+  assert.match(homepage, /@media \(min-width: 601px\) and \(max-width: 1279px\) \{[\s\S]*?\.manual-masthead\.container\s*\{[\s\S]*?padding-left: clamp\(24px, 2\.5vw, 32px\);[\s\S]*?padding-right: clamp\(24px, 2\.5vw, 32px\);/);
+  assert.ok(wideMasthead, 'wide-screen masthead layout is missing');
+  assert.match(wideMasthead[0], /grid-template-columns: minmax\(0, 1fr\) minmax\(360px, 400px\)/);
+  assert.match(wideMasthead[0], /"title figure"/);
+  assert.match(wideMasthead[0], /"install figure"/);
+  assert.match(wideMasthead[0], /\.masthead-figure\s*\{[\s\S]*?position: static;[\s\S]*?grid-area: figure/);
+  assert.match(homepage, /\.masthead-cta\s*\{\s*display: grid;\s*grid-template-columns: 1fr/);
 
   assert.ok(learnerStrip, 'institution and company learner strip is missing');
   assert.match(learnerStrip[0], /data-marquee/);
@@ -597,6 +615,43 @@ test('homepage preserves live GitHub CTAs and the motion-aware learner marquee',
   assert.match(learnerStyles[0], /\.marquee-track > \[aria-hidden="true"\]\s*\{\s*display: none/);
   assert.match(homepage, /if \(reducedMotion\.matches \|\| !half\.offsetWidth\) return/);
   assert.match(homepage, /reducedMotion\.addEventListener\('change', buildAll\)/);
+});
+
+test('shared header progressively compacts without hiding GitHub stars or search', () => {
+  const headerSource = fs.readFileSync(path.join(__dirname, 'header.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const movableTools = headerSource.match(/function isMovableTool\(child\) \{([\s\S]*?)\n    \}/);
+
+  assert.match(headerSource, /var COMPACT_HEADER_QUERY = '\(max-width: 1240px\)'/);
+  assert.match(headerSource, /var NARROW_HEADER_QUERY = '\(max-width: 820px\)'/);
+  assert.match(headerSource, /priorityNav\.className = 'header-priority-nav'/);
+  assert.match(headerSource, /label !== 'contents' && label !== 'catalog'/);
+  assert.match(headerSource, /if \(isNarrow\) restorePriorityLinks\(\);[\s\S]*?else movePriorityLinksOut\(\)/);
+
+  assert.match(
+    headerSource,
+    /github\.setAttribute\('data-header-persistent', 'true'\);[\s\S]*?inner\.insertBefore\(github, nav\.nextSibling\)/
+  );
+  assert.match(headerSource, /classList\.contains\('search-toggle'\)/);
+  assert.ok(movableTools, 'compact header tool filter is missing');
+  ['priorityNav', 'github', 'search'].forEach(control => {
+    assert.match(movableTools[0], new RegExp(`child !== ${control}`));
+  });
+  assert.match(headerSource, /function appendTool\(child\) \{[\s\S]*?tts-toggle[\s\S]*?tools\.appendChild\(child\)/);
+  assert.match(headerSource, /new MutationObserver\([\s\S]*?isMovableTool\(added\[j\]\)[\s\S]*?appendTool\(added\[j\]\)/);
+
+  assert.match(headerSource, /toggle\.setAttribute\('aria-controls', nav\.id\)/);
+  assert.match(headerSource, /toggle\.setAttribute\('aria-expanded', open \? 'true' : 'false'\)/);
+  assert.match(headerSource, /event\.key !== 'ArrowDown'[\s\S]*?setOpen\(true, false\)[\s\S]*?firstLink\.focus\(\)/);
+  assert.match(headerSource, /open && !header\.contains\(event\.target\)[\s\S]*?setOpen\(false, false\)/);
+  assert.match(headerSource, /event\.key === 'Escape'[\s\S]*?setOpen\(false, true\)/);
+
+  assert.match(styles, /\.header-inner\s*\{[\s\S]*?width: 100%;[\s\S]*?max-width: 1360px;[\s\S]*?min-width: 0;/);
+  assert.match(styles, /\.header-nav,\s*\n\.header-priority-nav\s*\{[\s\S]*?white-space: nowrap;/);
+  assert.match(styles, /@media \(max-width: 1320px\) and \(min-width: 1241px\)/);
+  assert.match(styles, /@media \(max-width: 1240px\) \{[\s\S]*?\.header-priority-nav\s*\{[\s\S]*?\.header-inner > \.header-github[\s\S]*?\.header-inner > \.search-toggle[\s\S]*?\.header-nav\s*\{[\s\S]*?width: min\(360px, calc\(100vw - 32px\)\);[\s\S]*?overflow-y: auto;/);
+  assert.match(styles, /@media \(max-width: 820px\) \{[\s\S]*?\.header-priority-nav\s*\{\s*display: none;[\s\S]*?\.header-inner > \.header-github[\s\S]*?\.header-inner > \.search-toggle/);
+  assert.match(styles, /@media \(max-width: 480px\) \{[\s\S]*?\.header-inner > \.header-github svg\s*\{\s*display: none;[\s\S]*?\.header-inner > \.header-github::before/);
 });
 
 test('website motion contracts keep interaction state stable and compositor-friendly', () => {

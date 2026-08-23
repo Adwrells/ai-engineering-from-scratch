@@ -309,13 +309,13 @@ def validate_method_result(method: str, result: dict[str, Any]) -> None:
             raise ProtocolViolation(f"task result requires non-empty {field}")
     if result["status"] not in {"working", "input_required", "completed", "cancelled", "failed"}:
         raise ProtocolViolation("task result has an unknown status")
-    ttl_ms = result.get("ttlMs", "missing")
-    if ttl_ms != "missing" and ttl_ms is not None and (
+    if "ttlMs" not in result:
+        raise ProtocolViolation("task result requires ttlMs")
+    ttl_ms = result["ttlMs"]
+    if ttl_ms is not None and (
         isinstance(ttl_ms, bool) or not isinstance(ttl_ms, int) or ttl_ms < 0
     ):
         raise ProtocolViolation("task result ttlMs must be null or a non-negative integer")
-    if ttl_ms == "missing":
-        raise ProtocolViolation("task result requires ttlMs")
     poll_interval = result.get("pollIntervalMs")
     if poll_interval is not None and (
         isinstance(poll_interval, bool) or not isinstance(poll_interval, int) or poll_interval < 0
@@ -723,8 +723,13 @@ def compare_sdk_view(
     raw_result: dict[str, Any],
     sdk_result: dict[str, Any],
     era: str = "modern",
+    capabilities: set[str] | None = None,
+    method: str = "tools/list",
 ) -> dict[str, Any]:
-    validated = validate_result(raw_result, era)
+    validated = validate_result(raw_result, era, capabilities)
+    method_result = dict(validated["wire"])
+    method_result["resultType"] = validated["semanticType"]
+    validate_method_result(method, method_result)
     bookkeeping = {"resultType", "_meta", "ttlMs", "cacheScope"}
     semantic_wire = {
         key: value for key, value in validated["wire"].items() if key not in bookkeeping
@@ -734,7 +739,6 @@ def compare_sdk_view(
         key for key in semantic_wire if key in sdk_result and semantic_wire[key] != sdk_result[key]
     )
     return {
-        "wireValid": True,
         "semanticMatch": not dropped and not changed,
         "droppedFields": dropped,
         "changedFields": changed,

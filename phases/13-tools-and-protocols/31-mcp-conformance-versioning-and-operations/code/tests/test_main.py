@@ -91,6 +91,13 @@ class ConformanceHarnessTests(unittest.TestCase):
         lower_headers = {name.lower(): value for name, value in headers.items()}
         main.validate_request(lower_headers, request, "modern")
 
+    def test_conflicting_duplicate_header_values_are_rejected(self) -> None:
+        headers, request = main.modern_request("tools/call", 1, "inventory_get")
+        headers["mcp-method"] = "tools/list"
+        with self.assertRaises(main.ProtocolViolation) as context:
+            main.validate_request(headers, request, "modern")
+        self.assertEqual(context.exception.code, -32020)
+
     def test_mcp_name_base64_sentinel_is_decoded_before_comparison(self) -> None:
         headers, request = main.modern_request("tools/call", 1, "résumé_lookup")
         self.assertTrue(headers["Mcp-Name"].startswith("=?base64?"))
@@ -139,6 +146,21 @@ class ConformanceHarnessTests(unittest.TestCase):
             {"io.modelcontextprotocol/tasks"},
         )
         self.assertEqual(normalized["semanticType"], "task")
+
+    def test_task_ttl_literal_missing_is_an_invalid_value_not_an_absent_field(self) -> None:
+        result = {
+            "resultType": "task",
+            "taskId": "t-1",
+            "status": "working",
+            "createdAt": "2026-08-21T10:00:00Z",
+            "lastUpdatedAt": "2026-08-21T10:00:00Z",
+            "ttlMs": "missing",
+        }
+        with self.assertRaisesRegex(
+            main.ProtocolViolation,
+            "ttlMs must be null or a non-negative integer",
+        ):
+            main.validate_method_result("tools/call", result)
 
     def test_completion_complete_validates_its_method_payload(self) -> None:
         main.validate_method_result(
@@ -208,6 +230,55 @@ class ConformanceHarnessTests(unittest.TestCase):
         self.assertTrue(bookkeeping_only["semanticMatch"])
         self.assertFalse(future_field["semanticMatch"])
         self.assertEqual(future_field["droppedFields"], ["futureHint"])
+
+    def test_sdk_differential_preserves_legacy_complete_inference(self) -> None:
+        report = main.compare_sdk_view(
+            {"tools": []},
+            {"tools": []},
+            era="legacy",
+        )
+
+        self.assertTrue(report["semanticMatch"])
+
+    def test_sdk_differential_accepts_advertised_task_result(self) -> None:
+        report = main.compare_sdk_view(
+            {
+                "resultType": "task",
+                "taskId": "t-2",
+                "status": "working",
+                "createdAt": "2026-08-21T10:00:00Z",
+                "lastUpdatedAt": "2026-08-21T10:00:00Z",
+                "ttlMs": 900_000,
+                "cacheScope": "private",
+            },
+            {
+                "taskId": "t-2",
+                "status": "working",
+                "createdAt": "2026-08-21T10:00:00Z",
+                "lastUpdatedAt": "2026-08-21T10:00:00Z",
+            },
+            capabilities={"io.modelcontextprotocol/tasks"},
+            method="tools/call",
+        )
+
+        self.assertTrue(report["semanticMatch"])
+        self.assertNotIn("wireValid", report)
+
+    def test_sdk_differential_rejects_malformed_advertised_task_result(self) -> None:
+        with self.assertRaisesRegex(
+            main.ProtocolViolation,
+            "task result requires non-empty status",
+        ):
+            main.compare_sdk_view(
+                {
+                    "resultType": "task",
+                    "taskId": "t-2",
+                    "ttlMs": 900_000,
+                },
+                {"taskId": "t-2"},
+                capabilities={"io.modelcontextprotocol/tasks"},
+                method="tools/call",
+            )
 
     def test_proxy_evidence_detects_error_collapse_and_redacts_credentials(self) -> None:
         headers, request = main.modern_request("tools/call", 1, "inventory_get")

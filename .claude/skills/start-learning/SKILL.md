@@ -38,11 +38,37 @@ showing a next command, use the correct form:
 Never present a Claude Code slash command as universal syntax. When the host is
 unknown, use the natural-language form.
 
+## Resume routing across course modes
+
+Before resolving an unnamed "resume" or "continue" request, inspect every
+supported state file in the current directory:
+
+- `LEARNING.md` belongs to `learn` for the full curriculum.
+- `MCP-LEARNING.md` belongs to `learn-mcp` for the Model Context Protocol
+  (MCP) route.
+- `MCP-ENGINEERING-LEARNING.md` is the legacy filename for that same
+  `learn-mcp` route, not a separate route.
+- `AGENT-SKILLS-LEARNING.md` belongs to `learn-agent-skills`.
+- `CLAUDE-CERTIFICATION.md` belongs to `claude-certification`.
+
+If the learner names a route, use its owner even when other state files exist.
+For an unnamed request, group the files by route owner. If exactly one route is
+represented, resume its owner. The two MCP filenames still represent one route;
+hand them to `learn-mcp`, which safely migrates or reports a collision. If two
+or more distinct routes are represented, list their learner-facing route names
+and ask which one to resume before running placement or changing any state.
+Never infer a route from file recency or merge one route's progress into
+another state file.
+
+Legacy runtimes may expose `learn-mcp-engineering` as an alias. Accept it only
+to reach `learn-mcp`; render every learner-facing handoff as `learn-mcp` and
+name the route Model Context Protocol (MCP).
+
 ## Focused MCP handoff
 
-If the learner explicitly wants Model Context Protocol (MCP) rather than the full course,
-do not run placement and do not create `LEARNING.md`. Route to the portable
-skill `learn-mcp`, whose source is
+If the learner explicitly wants Model Context Protocol (MCP) rather than the
+full course, do not run placement and do not create `LEARNING.md`. Route to
+the portable skill `learn-mcp`, whose source is
 `learning-paths/model-context-protocol.json` and whose state file is
 `MCP-LEARNING.md`. Use `$learn-mcp` in Codex,
 `/learn-mcp` in Claude Code, or ask another compatible host to use
@@ -51,13 +77,15 @@ evidence, and the public-deployment security gate.
 
 ## Focused Agent Skills handoff
 
-If the learner explicitly wants Agent Skills rather than the full course, do
-not run placement and do not create `LEARNING.md`. Route to the portable skill
+If the learner explicitly wants Agent Skills instead of the full course, or
+`AGENT-SKILLS-LEARNING.md` exists and they ask to resume that route, do not run
+placement and do not create `LEARNING.md`. Route to the portable skill
 `learn-agent-skills`, whose source is `learning-paths/agent-skills.json` and
 whose state file is `AGENT-SKILLS-LEARNING.md`. Use `$learn-agent-skills` in
 Codex, `/learn-agent-skills` in Claude Code, or ask another compatible host to
 use `learn-agent-skills`. The dedicated tutor owns the five-lesson order,
-real-host evidence, sandbox boundaries, and release gate.
+real-host evidence, sandbox boundaries, the Lesson 25 and tool-poisoning
+prerequisite gate before Lesson 26, and the release gate.
 
 If `LEARNING.md` already exists, do not overwrite it. Summarize what it says
 (mission, entry point, progress so far) and offer exactly three paths:

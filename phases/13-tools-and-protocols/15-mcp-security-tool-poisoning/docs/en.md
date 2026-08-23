@@ -191,6 +191,8 @@ The current capability has two valid form declarations. `{"elicitation":{}}` imp
 
 Treat `requestState` as hostile input. Sign or encrypt it, validate it, and bind it to method, tool, exact arguments, purpose, expiry, principal, and a one-time nonce when replay matters. The lesson code uses HMAC and exact argument matching to make the boundary visible.
 
+The nonce ledger must not live inside one gateway object. The runnable model injects a bounded, TTL-pruned replay store that can be shared by multiple gateway instances. Its atomic claim is the execution boundary: only a validated acceptance or explicit terminal decline consumes state. A malformed response or `cancel` executes nothing and remains retryable until expiry. A production fleet needs the same conditional claim in shared durable storage.
+
 Do not store hidden confirmation context in a protocol session. Any server instance should be able to validate the retry.
 
 ### Rule of two for high-risk calls
@@ -237,7 +239,7 @@ tp-tool-poisoning
 
 ## Build It
 
-`code/main.py` implements a small in-process security gateway model. It canonicalizes and pins full tool descriptors, reports metadata poisoning and shadowing, validates the modern request envelope and routing values, and performs a two-round confirmed export with signed `requestState`.
+`code/main.py` implements a small in-process security gateway model. It canonicalizes and pins full tool descriptors, reports metadata poisoning and shadowing, validates the modern request envelope and routing values, and performs a two-round confirmed export with signed `requestState` and an injected shared replay store.
 
 The model starts after an HTTP adapter has parsed the JSON body and routing headers. It does not validate `Content-Type` or `Accept`. Connect the same dispatcher to Lesson 09's complete Streamable HTTP adapter, which requires `Content-Type: application/json` and an `Accept` value containing both `application/json` and `text/event-stream`.
 
@@ -263,11 +265,12 @@ This lesson ships `outputs/skill-mcp-threat-model.md`. It produces a current-pro
 
 ## Exercises
 
-1. Add an expiry and authenticated principal to the sealed MRTR state. Reject expired state.
-2. Add a nonce store that prevents a confirmed export from being replayed.
-3. Change a tool's `inputSchema` without changing its description. Confirm whole-descriptor pinning catches it.
-4. Add a policy that refuses public caching when `tools/list` differs by principal.
-5. Model an older server behind the gateway. Put all handshake and session behavior behind an explicit `2025-11-25` compatibility branch.
+1. Bind the authenticated principal and current authorization decision to the sealed MRTR state, then reject a retry under a different principal.
+2. Replace the in-memory replay store with a persistent conditional insert and prove two processes cannot both claim one nonce.
+3. Inject a failure after replay claim but before a simulated export. Define and test the transaction or idempotency rule that makes recovery safe.
+4. Change a tool's `inputSchema` without changing its description. Confirm whole-descriptor pinning catches it.
+5. Add a policy that refuses public caching when `tools/list` differs by principal.
+6. Model an older server behind the gateway. Put all handshake and session behavior behind an explicit `2025-11-25` compatibility branch.
 
 ## Key Terms
 

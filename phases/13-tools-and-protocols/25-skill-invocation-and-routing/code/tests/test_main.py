@@ -7,6 +7,7 @@ import unittest
 import argparse
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 
 sys.dont_write_bytecode = True
@@ -29,6 +30,22 @@ SKILLS = (
     SkillMetadata("incident-triage", "Triage incident timeline evidence."),
     SkillMetadata("release-notes", "Draft release notes from merged changes."),
 )
+
+
+def load_bundled_router(module_name: str):
+    script_path = (
+        Path(__file__).resolve().parents[2]
+        / "outputs"
+        / "skill-invocation-router"
+        / "scripts"
+        / "simulate_invocation.py"
+    )
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load bundled router from {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class InvocationTests(unittest.TestCase):
@@ -177,6 +194,13 @@ class InvocationTests(unittest.TestCase):
         )
         self.assertFalse(decision.activated)
 
+    def test_unknown_actor_does_not_inherit_harness_authority(self) -> None:
+        allowed, reason = CorePolicyAdapter(
+            InvocationPolicy(harness_allowlist=("incident-triage",))
+        ).allows(SKILLS[0], SimpleNamespace(value="future"))
+        self.assertFalse(allowed)
+        self.assertIn("unknown actor", reason)
+
     def test_policy_rejects_invalid_threshold_and_boolean_types(self) -> None:
         with self.assertRaises(ValueError):
             InvocationPolicy(model_threshold=-0.1)
@@ -265,18 +289,7 @@ class InvocationTests(unittest.TestCase):
         )
 
     def test_bundled_router_enforces_recognized_invocation_extension(self) -> None:
-        script_path = (
-            Path(__file__).resolve().parents[2]
-            / "outputs"
-            / "skill-invocation-router"
-            / "scripts"
-            / "simulate_invocation.py"
-        )
-        spec = importlib.util.spec_from_file_location("bundled_router", script_path)
-        self.assertIsNotNone(spec)
-        self.assertIsNotNone(spec.loader)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_bundled_router("bundled_router")
         args = argparse.Namespace(
             actor="human",
             name="release-notes",
@@ -296,18 +309,7 @@ class InvocationTests(unittest.TestCase):
         self.assertEqual(decision["adapter"], "host-extension-policy")
 
     def test_bundled_router_rejects_invalid_policy_types(self) -> None:
-        script_path = (
-            Path(__file__).resolve().parents[2]
-            / "outputs"
-            / "skill-invocation-router"
-            / "scripts"
-            / "simulate_invocation.py"
-        )
-        spec = importlib.util.spec_from_file_location("bundled_router_invalid", script_path)
-        self.assertIsNotNone(spec)
-        self.assertIsNotNone(spec.loader)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_bundled_router("bundled_router_invalid")
         args = argparse.Namespace(
             actor="model",
             name="release-notes",
@@ -321,18 +323,7 @@ class InvocationTests(unittest.TestCase):
             module.decide(args, {"allowModel": "false", "modelThreshold": -1})
 
     def test_bundled_router_checks_eligibility_before_relevance(self) -> None:
-        script_path = (
-            Path(__file__).resolve().parents[2]
-            / "outputs"
-            / "skill-invocation-router"
-            / "scripts"
-            / "simulate_invocation.py"
-        )
-        spec = importlib.util.spec_from_file_location("bundled_router_order", script_path)
-        self.assertIsNotNone(spec)
-        self.assertIsNotNone(spec.loader)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_bundled_router("bundled_router_order")
         args = argparse.Namespace(
             actor="model",
             name="release-notes",

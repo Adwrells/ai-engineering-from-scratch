@@ -43,6 +43,155 @@ function loadContentSource() {
   return context.window.AIFSContentSource;
 }
 
+function createMcpTestDom() {
+  const ids = new Map();
+
+  class TestNode {
+    constructor(tagName, text = '') {
+      this.nodeType = tagName ? 1 : 3;
+      this.tagName = tagName ? tagName.toUpperCase() : '';
+      this.parentNode = null;
+      this.childNodes = [];
+      this.attributes = new Map();
+      this.listeners = new Map();
+      this.className = '';
+      this._id = '';
+      this._text = String(text);
+      this._innerHtml = '';
+    }
+
+    get children() {
+      return this.childNodes.filter(child => child.nodeType === 1);
+    }
+
+    get firstChild() {
+      return this.childNodes[0] || null;
+    }
+
+    get id() {
+      return this._id;
+    }
+
+    set id(value) {
+      if (this._id && ids.get(this._id) === this) ids.delete(this._id);
+      this._id = String(value || '');
+      if (this._id) ids.set(this._id, this);
+    }
+
+    get textContent() {
+      if (this.nodeType === 3) return this._text;
+      return this._text + this.childNodes.map(child => child.textContent).join('');
+    }
+
+    set textContent(value) {
+      this.childNodes.forEach(child => { child.parentNode = null; });
+      this.childNodes = [];
+      this._text = String(value ?? '');
+      this._innerHtml = '';
+    }
+
+    get innerHTML() {
+      return this._innerHtml || this.textContent;
+    }
+
+    set innerHTML(value) {
+      this.childNodes.forEach(child => { child.parentNode = null; });
+      this.childNodes = [];
+      this._text = '';
+      this._innerHtml = String(value ?? '');
+    }
+
+    setAttribute(name, value) {
+      const normalized = String(value);
+      if (name === 'id') this.id = normalized;
+      else if (name === 'class') this.className = normalized;
+      else this.attributes.set(name, normalized);
+    }
+
+    getAttribute(name) {
+      if (name === 'id') return this.id || null;
+      if (name === 'class') return this.className || null;
+      return this.attributes.has(name) ? this.attributes.get(name) : null;
+    }
+
+    hasAttribute(name) {
+      return this.getAttribute(name) !== null;
+    }
+
+    appendChild(child) {
+      if (child.parentNode) child.parentNode.removeChild(child);
+      this._text = '';
+      this._innerHtml = '';
+      this.childNodes.push(child);
+      child.parentNode = this;
+      return child;
+    }
+
+    removeChild(child) {
+      const index = this.childNodes.indexOf(child);
+      if (index < 0) throw new Error('Cannot remove a node that is not a child');
+      this.childNodes.splice(index, 1);
+      child.parentNode = null;
+      return child;
+    }
+
+    addEventListener(type, listener) {
+      const listeners = this.listeners.get(type) || [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+
+    dispatchEvent(event) {
+      const normalized = typeof event === 'string' ? { type: event } : event;
+      if (!normalized.target) normalized.target = this;
+      for (const listener of this.listeners.get(normalized.type) || []) listener.call(this, normalized);
+      return true;
+    }
+
+    click() {
+      this.dispatchEvent({ type: 'click', target: this });
+    }
+  }
+
+  const document = {
+    createElement(tagName) {
+      return new TestNode(tagName);
+    },
+    createTextNode(text) {
+      return new TestNode('', text);
+    },
+    getElementById(id) {
+      return ids.get(id) || null;
+    },
+  };
+  document.head = document.createElement('head');
+
+  function el(tag, attrs, kids) {
+    const node = document.createElement(tag);
+    for (const [name, value] of Object.entries(attrs || {})) {
+      if (name === 'class') node.className = value;
+      else if (name === 'html') node.innerHTML = value;
+      else node.setAttribute(name, value);
+    }
+    for (const child of kids || []) {
+      node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    }
+    return node;
+  }
+
+  function findAll(root, predicate) {
+    const matches = [];
+    function visit(node) {
+      if (predicate(node)) matches.push(node);
+      node.childNodes.forEach(visit);
+    }
+    visit(root);
+    return matches;
+  }
+
+  return { document, el, findAll };
+}
+
 function loadMcpLabLogic() {
   const file = path.join(__dirname, 'figures-mcp.js');
   const source = fs.readFileSync(file, 'utf8');
@@ -57,32 +206,65 @@ function loadMcpLabLogic() {
     conformanceScenarios: conformanceScenarios,
     reliabilityScenarios: reliabilityScenarios,
     admissionScenarios: admissionScenarios,
+    primitiveScenarios: primitiveScenarios,
+    retryScenarios: retryScenarios,
+    driftScenarios: driftScenarios,
+    mergeScenarios: mergeScenarios,
+    boundaryScenarios: boundaryScenarios,
+    taskScenarios: taskScenarios,
+    appScenarios: appScenarios,
+    poisonScenarios: poisonScenarios,
+    oauthScenarios: oauthScenarios,
+    jwksScenarios: jwksScenarios,
     evaluateContract: evaluateContract,
     evaluateTransport: evaluateTransport,
     evaluateRequestScenario: evaluateRequestScenario,
     evaluateDispatch: evaluateDispatch,
     evaluateConformance: evaluateConformance,
     evaluateReliability: evaluateReliability,
-    evaluateAdmission: evaluateAdmission
+    evaluateAdmission: evaluateAdmission,
+    evaluatePrimitive: evaluatePrimitive,
+    evaluateRetry: evaluateRetry,
+    evaluateDrift: evaluateDrift,
+    evaluateMerge: evaluateMerge,
+    evaluateBoundary: evaluateBoundary,
+    evaluateTask: evaluateTask,
+    evaluateApp: evaluateApp,
+    evaluatePoison: evaluatePoison,
+    evaluateOAuth: evaluateOAuth,
+    evaluateJwks: evaluateJwks
   };
 `;
+  const dom = createMcpTestDom();
+  const registrations = {};
   const context = {
     window: {
       LF: {
-        el() {
-          throw new Error('DOM rendering must not run in evaluator tests');
+        el: dom.el,
+        register(entries) {
+          Object.assign(registrations, entries);
         },
-        register() {},
       },
     },
-    document: {},
+    document: dom.document,
   };
   vm.runInNewContext(
     source.replace(registrationMarker, testExport + registrationMarker),
     context,
     { filename: file }
   );
-  return context.window.__MCP_LAB_TEST_API;
+  return {
+    ...context.window.__MCP_LAB_TEST_API,
+    registeredFigureIds: Object.keys(registrations).sort(),
+    document: dom.document,
+    renderFigure(id) {
+      const host = dom.document.createElement('div');
+      assert.equal(typeof registrations[id], 'function', `missing renderer for ${id}`);
+      registrations[id](host);
+      return host;
+    },
+    findAll: dom.findAll,
+  };
 }
 
 function plainMcpValue(value) {
@@ -221,6 +403,33 @@ function loadFigureRuntime({ reducedMotion = false } = {}) {
     scheduledFrames,
     dispatchWindow(type) { if (windowListeners[type]) windowListeners[type](); },
     cancelledFrames() { return cancelledFrames; },
+  };
+}
+
+function loadLearningPathProgressRuntime(storage) {
+  const lessonHtml = fs.readFileSync(path.join(__dirname, 'lesson.html'), 'utf8');
+  const match = lessonHtml.match(/<script id="learningPathProgressRuntime">([\s\S]*?)<\/script>/);
+  assert.ok(match, 'lesson reader is missing the learning-path progress runtime');
+  const context = { window: { localStorage: storage } };
+  vm.runInNewContext(match[1], context, { filename: 'lesson.html#learningPathProgressRuntime' });
+  return context.window.AIFSLearningPathProgress;
+}
+
+function createMemoryStorage(initial = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    getItem(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+    setItem(key, value) {
+      values.set(key, String(value));
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    value(key) {
+      return values.get(key);
+    },
   };
 }
 
@@ -371,11 +580,35 @@ test('site discovery rejects a bundle reached through an escaping parent symlink
     description: 'Gate a release.',
     version: '2.1.0',
   });
+  writeMarkdown(path.join(outsideOutputs, 'skill-leaked-reviewer.md'), {
+    name: 'leaked-reviewer',
+    description: 'This flat artifact must never be ingested.',
+    version: '1.0.0',
+  });
   fs.symlinkSync(outsideOutputs, path.join(lesson, 'outputs'), 'dir');
 
   assert.throws(
     () => discoverArtifacts(root),
-    /Skill bundle escapes the repository/
+    /Lesson outputs escapes the repository/
+  );
+});
+
+test('site discovery rejects an in-repository outputs directory symlink', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aiefs-site-artifacts-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const lesson = path.join(root, 'phases', '14-agent-engineering', '22-skill-runtime');
+  const sharedOutputs = path.join(root, 'shared-outputs');
+  fs.mkdirSync(lesson, { recursive: true });
+  writeMarkdown(path.join(sharedOutputs, 'skill-shared-reviewer.md'), {
+    name: 'shared-reviewer',
+    description: 'This artifact is in the repository but behind a symlink.',
+    version: '1.0.0',
+  });
+  fs.symlinkSync(sharedOutputs, path.join(lesson, 'outputs'), 'dir');
+
+  assert.throws(
+    () => discoverArtifacts(root),
+    /Lesson outputs must be a regular directory/
   );
 });
 
@@ -461,6 +694,7 @@ test('learning path manifests preserve route order and use canonical lesson titl
         checkpointEvidence: ['A real host invocation transcript.'],
       },
       {
+        order: 2,
         path: 'phases/13-tools-and-protocols/24-skill-discovery-and-progressive-disclosure',
         prerequisitePaths: ['phases/13-tools-and-protocols/22-skills-and-agent-sdks'],
       },
@@ -503,6 +737,107 @@ test('learning path manifests preserve route order and use canonical lesson titl
   assert.equal(learningPath.optionalLessons[0].required, false);
 });
 
+test('learning path manifests reject duplicate and unresolved prerequisite checks', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aiefs-learning-paths-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'learning-paths'), { recursive: true });
+  const lessonPath = 'phases/13-tools-and-protocols/22-skills-and-agent-sdks';
+  const phases = [{
+    id: 13,
+    name: 'Tools and Protocols',
+    lessons: [{
+      name: 'Skills and Agent SDKs',
+      type: 'Build',
+      lang: 'Python',
+      url: 'https://github.com/rohitg00/ai-engineering-from-scratch/tree/main/' + lessonPath + '/',
+    }],
+  }];
+  const manifestFile = path.join(root, 'learning-paths', 'agent-skills.json');
+
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    id: 'agent-skills',
+    prerequisites: [{ id: 'poisoning' }, { id: 'poisoning' }],
+    lessons: [{ path: lessonPath, prerequisiteChecks: ['poisoning'] }],
+  }));
+  assert.throws(
+    () => parseLearningPaths(root, phases),
+    /repeats prerequisite id: poisoning/
+  );
+
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    id: 'agent-skills',
+    prerequisites: [{ id: 'poisoning' }],
+    lessons: [{ path: lessonPath, prerequisiteChecks: ['poisoning-typo'] }],
+  }));
+  assert.throws(
+    () => parseLearningPaths(root, phases),
+    /references an unknown prerequisite check: poisoning-typo/
+  );
+});
+
+test('learning path manifests reject invalid prerequisite path graphs', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aiefs-learning-paths-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'learning-paths'), { recursive: true });
+  const paths = [
+    'phases/13-tools-and-protocols/22-skills-and-agent-sdks',
+    'phases/13-tools-and-protocols/24-skill-discovery-and-progressive-disclosure',
+    'phases/13-tools-and-protocols/25-skill-invocation-and-routing',
+  ];
+  const github = 'https://github.com/rohitg00/ai-engineering-from-scratch/tree/main/';
+  const phases = [{
+    id: 13,
+    name: 'Tools and Protocols',
+    lessons: paths.map((lessonPath, index) => ({
+      name: `Lesson ${index + 1}`,
+      type: 'Build',
+      lang: 'Python',
+      url: github + lessonPath + '/',
+    })),
+  }];
+  const manifestFile = path.join(root, 'learning-paths', 'route.json');
+  const writeRoute = lessons => fs.writeFileSync(
+    manifestFile,
+    JSON.stringify({ id: 'route', lessons })
+  );
+
+  writeRoute([
+    { path: paths[0] },
+    { path: paths[1], prerequisitePaths: ['phases/13-tools-and-protocols/99-missing'] },
+  ]);
+  assert.throws(
+    () => parseLearningPaths(root, phases),
+    /references an unknown prerequisite path/
+  );
+
+  writeRoute([
+    { path: paths[0] },
+    { path: paths[1], prerequisitePaths: [paths[1]] },
+  ]);
+  assert.throws(
+    () => parseLearningPaths(root, phases),
+    /cannot depend on itself/
+  );
+
+  writeRoute([
+    { path: paths[0], prerequisitePaths: [paths[1]] },
+    { path: paths[1] },
+  ]);
+  assert.throws(
+    () => parseLearningPaths(root, phases),
+    /has a forward prerequisite/
+  );
+
+  writeRoute([
+    { path: paths[0], prerequisitePaths: [paths[1]] },
+    { path: paths[1], prerequisitePaths: [paths[0]] },
+  ]);
+  assert.throws(
+    () => parseLearningPaths(root, phases),
+    /contains a prerequisite cycle/
+  );
+});
+
 test('repository Agent Skills path routes 22 to 24 and keeps 23 optional', () => {
   const root = path.resolve(__dirname, '..');
   const roadmap = parseRoadmap(fs.readFileSync(path.join(root, 'ROADMAP.md'), 'utf8'));
@@ -515,9 +850,96 @@ test('repository Agent Skills path routes 22 to 24 and keeps 23 optional', () =>
   assert.equal(learningPath.lessons[0].path, 'phases/13-tools-and-protocols/22-skills-and-agent-sdks');
   assert.equal(learningPath.lessons[1].path, 'phases/13-tools-and-protocols/24-skill-discovery-and-progressive-disclosure');
   assert.deepEqual(learningPath.lessons[3].prerequisitePaths, [
-    'phases/13-tools-and-protocols/15-mcp-security-tool-poisoning',
     'phases/13-tools-and-protocols/25-skill-invocation-and-routing',
   ]);
+  assert.deepEqual(learningPath.lessons[3].prerequisiteChecks, [
+    'tool-poisoning-and-untrusted-instructions',
+  ]);
+  const poisoningPreflight = learningPath.prerequisites.find(
+    entry => entry.id === 'tool-poisoning-and-untrusted-instructions'
+  );
+  assert.equal(poisoningPreflight.title, 'Tool poisoning and untrusted instructions');
+  assert.equal(poisoningPreflight.required, true);
+  assert.equal(Object.hasOwn(poisoningPreflight, 'path'), false);
+});
+
+test('Agent Skills knowledge preflight persists per path and gates Lesson 26 deterministically', () => {
+  const root = path.resolve(__dirname, '..');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'learning-paths', 'agent-skills.json'), 'utf8'));
+  const lesson = manifest.lessons.find(entry => entry.lesson === 26);
+  const checkId = 'tool-poisoning-and-untrusted-instructions';
+  const storage = createMemoryStorage();
+  const progress = loadLearningPathProgressRuntime(storage);
+
+  assert.equal(progress.storageKey, 'aifs:learning-path-progress:v1');
+  const completedPaths = new Set();
+  const isLessonComplete = lessonPath => completedPaths.has(lessonPath);
+  assert.equal(progress.canEnter(manifest, lesson, isLessonComplete), false);
+  assert.deepEqual(Array.from(progress.unmetPaths(lesson, isLessonComplete)), [
+    'phases/13-tools-and-protocols/25-skill-invocation-and-routing',
+  ]);
+  assert.deepEqual(
+    Array.from(progress.unmetChecks(manifest, lesson), check => check.id),
+    [checkId]
+  );
+
+  assert.equal(progress.confirm(manifest.id, checkId), true);
+  assert.equal(progress.canEnter(manifest, lesson, isLessonComplete), false);
+  completedPaths.add('phases/13-tools-and-protocols/25-skill-invocation-and-routing');
+  assert.equal(progress.canEnter(manifest, lesson, isLessonComplete), true);
+  assert.equal(
+    storage.value(progress.storageKey),
+    JSON.stringify({ version: 1, paths: { 'agent-skills': { checks: { [checkId]: true } } } })
+  );
+
+  const restored = loadLearningPathProgressRuntime(storage);
+  assert.equal(restored.isConfirmed('agent-skills', checkId), true);
+  assert.equal(restored.isConfirmed('model-context-protocol', checkId), false);
+  assert.equal(restored.canEnter(manifest, lesson, isLessonComplete), true);
+});
+
+test('learning path navigation selects the first actually unmet knowledge check', () => {
+  const manifest = {
+    id: 'agent-skills',
+    prerequisites: [
+      { id: 'first', title: 'First check' },
+      { id: 'second', title: 'Second check' },
+    ],
+  };
+  const lesson = { prerequisiteChecks: ['first', 'second'] };
+  const progress = loadLearningPathProgressRuntime(createMemoryStorage());
+
+  assert.equal(progress.firstUnmetCheckId(manifest, lesson), 'first');
+  assert.equal(progress.confirm(manifest.id, 'first'), true);
+  assert.equal(progress.firstUnmetCheckId(manifest, lesson), 'second');
+});
+
+test('generic course skills route unambiguous state and stop on multi-route ambiguity', () => {
+  const root = path.resolve(__dirname, '..');
+  for (const name of ['learn', 'start-learning']) {
+    const source = fs.readFileSync(path.join(root, 'skills', name, 'SKILL.md'), 'utf8');
+    const section = source.match(/## Focused Agent Skills handoff\s+([\s\S]*?)(?=\n## |$)/);
+    assert.ok(section, `${name} is missing the focused Agent Skills handoff`);
+    assert.match(section[1], /AGENT-SKILLS-LEARNING\.md/);
+    assert.match(section[1], /learn-agent-skills/);
+    assert.match(section[1], /do not\s+(?:copy Agent Skills state into|create)\s+`LEARNING\.md`/);
+    const resume = source.match(/## Resume routing across course modes\s+([\s\S]*?)(?=\n## |$)/);
+    assert.ok(resume, `${name} is missing cross-route resume handling`);
+    for (const stateFile of [
+      'LEARNING.md',
+      'MCP-LEARNING.md',
+      'MCP-ENGINEERING-LEARNING.md',
+      'AGENT-SKILLS-LEARNING.md',
+      'CLAUDE-CERTIFICATION.md',
+    ]) {
+      assert.ok(resume[1].includes('`' + stateFile + '`'), `${name} omits ${stateFile}`);
+    }
+    assert.match(resume[1], /group the files by route owner/);
+    assert.match(resume[1], /exactly one route is\s+represented, resume its owner/);
+    assert.match(resume[1], /The two MCP filenames still represent one route/);
+    assert.match(resume[1], /If two\s+or more distinct routes are represented/);
+    assert.match(resume[1], /ask which one to resume/);
+  }
 });
 
 test('repository exposes the canonical Model Context Protocol learning path only', () => {
@@ -745,6 +1167,16 @@ test('lesson reader keeps learning-path context and renders a copyable full-dept
   assert.match(lessonHtml, /searchParams\.set\('learningPath', pathId\)/);
   assert.match(lessonHtml, /Lesson ' \+ \(focusedIndex \+ 1\) \+ ' of ' \+ focusedLessons\.length/);
   assert.match(lessonHtml, /prerequisitePaths: pathEntry/);
+  assert.match(lessonHtml, /prerequisiteChecks: pathEntry/);
+  assert.match(lessonHtml, /data-prerequisite-paths/);
+  assert.match(lessonHtml, /learningPathEntryLocked/);
+  assert.match(lessonHtml, /firstId = linkUnmetLearningPathCheckIds\(link\)\[0\]/);
+  assert.match(lessonHtml, /var nextLocked = learningPathMode && learningPathEntryLocked\(next\)/);
+  assert.match(
+    lessonHtml,
+    /data-learning-path-gate-label>'\s*\+\s*\(nextLocked\s*\?\s*'Locked'\s*:\s*'Next &rarr;'\)/
+  );
+  assert.doesNotMatch(lessonHtml, /\|\| \{ id: checkId, title: checkId, description: '' \}/);
   assert.match(lessonHtml, /learningPathPrerequisiteCallout\(nextRequired/);
   assert.match(lessonHtml, /--skill ' \+ skillName \+ ' --full-depth/);
   assert.match(lessonHtml, /class="output-btn output-install-copy"/);
@@ -799,7 +1231,7 @@ test('MCP lesson labs override legacy figures with modern inspectable protocol o
   ]);
   assert.equal(manifest.providersByFigure['mcp-tool-call'].at(-1), 'figures-mcp.js');
 
-  [
+  const expectedFigureIds = [
     'mcp-tool-call',
     't3-dispatch-loop',
     'tp-client-merge',
@@ -817,9 +1249,9 @@ test('MCP lesson labs override legacy figures with modern inspectable protocol o
     'mcp-reliability-race',
     'mcp-registry-admission',
     'mcp-conformance-operations',
-  ].forEach(figureId => {
-    assert.match(moduleSource, new RegExp(`['"]${figureId}['"]\\s*:`));
-  });
+  ].sort();
+  const logic = loadMcpLabLogic();
+  assert.deepEqual(logic.registeredFigureIds, expectedFigureIds);
 
   assert.doesNotMatch(moduleSource, /repeatCount\s*[:=]/);
   assert.doesNotMatch(moduleSource, /rpcRequest\([^)]*notifications\/progress/);
@@ -839,46 +1271,123 @@ test('MCP lesson labs override legacy figures with modern inspectable protocol o
   assert.match(moduleSource, /stageView\.node\.hidden = false/);
   assert.doesNotMatch(moduleSource, /pipeline\.(?:replaceChildren|innerHTML\s*=|textContent\s*=)/);
 
-  [
-    'io.modelcontextprotocol/protocolVersion',
-    'io.modelcontextprotocol/clientCapabilities',
-    'io.modelcontextprotocol/clientInfo',
-    'io.modelcontextprotocol/serverInfo',
-    'MCP-Protocol-Version',
-    'Mcp-Method',
-    'Mcp-Name',
-    'server/discover',
-    'supportedVersions',
-    'resultType',
-    'structuredContent',
-    'outputSchema',
-    'subscriptions/listen',
-    'io.modelcontextprotocol/subscriptionId',
-    'input_required',
-    'inputRequests',
-    'inputResponses',
-    'requestState',
-    'tasks/cancel',
-    'tasks/get',
-    'tasks/update',
-    'cancelled',
-    'completion/complete',
-    'nextCursor',
-    '_meta.ui.resourceUri',
-    'resourceUri',
+  for (const figureId of expectedFigureIds) {
+    const host = logic.renderFigure(figureId);
+    const figures = logic.findAll(host, node => node.tagName === 'FIGURE');
+    assert.equal(figures.length, 1, `${figureId} must render one semantic figure`);
+    const figure = figures[0];
+    const captions = logic.findAll(figure, node => node.tagName === 'FIGCAPTION');
+    assert.equal(captions.length, 1, `${figureId} must render one figcaption`);
+    assert.ok(captions[0].textContent.trim(), `${figureId} must explain its outcome`);
+    const titleId = figure.getAttribute('aria-labelledby');
+    assert.ok(titleId && logic.document.getElementById(titleId), `${figureId} must label its figure`);
+
+    const verdict = logic.findAll(figure, node => node.getAttribute && node.getAttribute('class') === 'mcp-lab__verdict')[0];
+    assert.equal(verdict.getAttribute('role'), 'status');
+    assert.equal(verdict.getAttribute('aria-live'), 'polite');
+    assert.equal(verdict.getAttribute('aria-atomic'), 'true');
+
+    const scenarioButtons = logic.findAll(figure, node =>
+      node.tagName === 'BUTTON' && String(node.className).split(/\s+/).includes('mcp-lab__scenario')
+    );
+    assert.ok(scenarioButtons.length > 1, `${figureId} must expose multiple scenarios`);
+    assert.equal(scenarioButtons[0].getAttribute('aria-pressed'), 'true');
+    assert.equal(scenarioButtons[1].getAttribute('aria-pressed'), 'false');
+    scenarioButtons[1].click();
+    assert.equal(scenarioButtons[0].getAttribute('aria-pressed'), 'false');
+    assert.equal(scenarioButtons[1].getAttribute('aria-pressed'), 'true');
+
+    const action = logic.findAll(figure, node =>
+      node.tagName === 'BUTTON' && String(node.className).split(/\s+/).includes('mcp-lab__action')
+    )[0];
+    const runBefore = figure.getAttribute('data-run');
+    action.click();
+    assert.notEqual(figure.getAttribute('data-run'), runBefore);
+    assert.ok(verdict.getAttribute('data-announced'));
+  }
+
+  const styles = logic.document.getElementById('mcp-lab-styles');
+  assert.ok(styles, 'rendering must install the MCP lab styles');
+  assert.match(styles.textContent, /@media\(max-width:640px\)/);
+  assert.match(styles.textContent, /@media\(prefers-reduced-motion:reduce\)/);
+  assert.match(styles.textContent, /transform:none!important/);
+  assert.equal(
+    logic.document.head.children.filter(child => child.id === 'mcp-lab-styles').length,
+    1,
+    'rendering many labs must not duplicate the style element'
+  );
+});
+
+test('MCP evaluators expose each protocol boundary in its owning scenario', () => {
+  const logic = loadMcpLabLogic();
+  const byId = (entries, id) => entries.find(entry => entry.id === id);
+
+  const discovery = plainMcpValue(logic.evaluateRequestScenario(byId(logic.requestScenarios, 'discover')));
+  assert.equal(discovery.evidence.request.body.method, 'server/discover');
+  assert.equal(discovery.evidence.request.body.params._meta['io.modelcontextprotocol/protocolVersion'], '2026-07-28');
+  assert.deepEqual(discovery.evidence.request.body.params._meta['io.modelcontextprotocol/clientCapabilities'], { tools: {} });
+  assert.equal(discovery.evidence.request.body.params._meta['io.modelcontextprotocol/clientInfo'].name, 'course-host');
+  assert.equal(discovery.evidence.request.headers['MCP-Protocol-Version'], '2026-07-28');
+  assert.equal(discovery.evidence.request.headers['Mcp-Method'], 'server/discover');
+  assert.deepEqual(discovery.evidence.response.body.result.supportedVersions, ['2026-07-28']);
+  assert.equal(discovery.evidence.response.body.result._meta['io.modelcontextprotocol/serverInfo'].name, 'notes-replica-b');
+
+  const subscription = plainMcpValue(logic.evaluateTransport(byId(logic.transportScenarios, 'listen')));
+  assert.equal(subscription.evidence.request.body.method, 'subscriptions/listen');
+  assert.equal(subscription.evidence.response.events[0].params._meta['io.modelcontextprotocol/subscriptionId'], 'listen-1');
+
+  const retry = plainMcpValue(logic.evaluateRetry(byId(logic.retryScenarios, 'valid')));
+  assert.equal(retry.evidence.firstResponse.result.resultType, 'input_required');
+  assert.ok(retry.evidence.firstResponse.result.inputRequests.pick_files);
+  assert.ok(retry.evidence.retryRequest.params.inputResponses.pick_files);
+  assert.equal(retry.evidence.retryRequest.params.requestState, retry.evidence.firstResponse.result.requestState);
+  assert.equal(retry.evidence.finalResponse.result.resultType, 'complete');
+  assert.deepEqual(retry.evidence.finalResponse.result.structuredContent.filesUsed, ['README.md', 'server.py', 'docs/intro.md']);
+
+  const completion = plainMcpValue(logic.evaluateContract(byId(logic.contractScenarios, 'completion')));
+  assert.equal(completion.evidence.callRequest.method, 'completion/complete');
+  const cursor = plainMcpValue(logic.evaluateContract(byId(logic.contractScenarios, 'cursor')));
+  assert.equal(cursor.evidence.callResponse.result.nextCursor, 'cur_J9opaque');
+  assert.equal(cursor.evidence.continuationRequest.params.cursor, 'cur_J9opaque');
+
+  const taskInput = plainMcpValue(logic.evaluateTask(byId(logic.taskScenarios, 'input')));
+  assert.equal(taskInput.evidence.request.method, 'tasks/get');
+  assert.ok(taskInput.evidence.response.result.inputRequests.approve_outline);
+  const taskUpdate = plainMcpValue(logic.evaluateTask(byId(logic.taskScenarios, 'update')));
+  assert.equal(taskUpdate.evidence.request.method, 'tasks/update');
+  assert.equal(taskUpdate.evidence.request.params.inputResponses.approve_outline.action, 'accept');
+  const taskCancelled = plainMcpValue(logic.evaluateTask(byId(logic.taskScenarios, 'cancelled')));
+  assert.equal(taskCancelled.evidence.request.method, 'tasks/cancel');
+  assert.equal(taskCancelled.evidence.after.status, 'cancelled');
+
+  const app = plainMcpValue(logic.evaluateApp(byId(logic.appScenarios, 'lifecycle')));
+  const descriptor = app.evidence.toolDiscovery.result.tools[0];
+  assert.equal(descriptor._meta.ui.resourceUri, 'ui://notes/timeline.html');
+  assert.equal(app.evidence.uiResourceRead.params.uri, descriptor._meta.ui.resourceUri);
+  assert.deepEqual(app.evidence.bridge.map(message => message.method).filter(Boolean), [
     'ui/initialize',
     'ui/notifications/initialized',
-    'Exact search collision',
-    'protectedResource',
-    'tokenAudience',
-    'returnedIss',
-    'singleflightRefresh',
-    'introspection',
-    'serverInfo are not security identity',
-    'normalizedDiff',
-  ].forEach(field => {
-    assert.ok(moduleSource.includes(field), `missing MCP lab field: ${field}`);
-  });
+  ]);
+
+  const collision = plainMcpValue(logic.evaluateMerge(byId(logic.mergeScenarios, 'collision'), 'prefix'));
+  assert.deepEqual(collision.evidence.collisions, ['search']);
+  assert.equal(collision.evidence.canonicalRouteTable['issues/search'].peer, 'issues');
+
+  const oauth = plainMcpValue(logic.evaluateOAuth(byId(logic.oauthScenarios, 'valid')));
+  assert.equal(oauth.evidence.boundaryValues.protectedResource, oauth.evidence.boundaryValues.requestedResource);
+  assert.equal(oauth.evidence.boundaryValues.tokenAudience, oauth.evidence.boundaryValues.requestedResource);
+  assert.equal(oauth.evidence.boundaryValues.returnedIss, oauth.evidence.boundaryValues.authorizationServer);
+  const opaque = plainMcpValue(logic.evaluateJwks(byId(logic.jwksScenarios, 'opaque')));
+  assert.equal(opaque.evidence.token.format, 'opaque');
+  assert.match(opaque.evidence.actions.join(' '), /introspection/);
+  const singleflight = plainMcpValue(logic.evaluateJwks(byId(logic.jwksScenarios, 'singleflight')));
+  assert.match(singleflight.evidence.actions.join(' '), /singleflightRefresh/);
+
+  const drift = plainMcpValue(logic.evaluateDrift(byId(logic.driftScenarios, 'aligned')));
+  assert.equal(drift.evidence.identityRule, 'display name and serverInfo are not security identity');
+  const conformance = plainMcpValue(logic.evaluateConformance(byId(logic.conformanceScenarios, 'unknown-result'), 'differential'));
+  assert.equal(conformance.kind, 'nonconformant');
+  assert.deepEqual(conformance.evidence.normalizedDiff.map(entry => entry.path), ['$.decision', '$.normalized']);
 });
 
 test('every Agent Skills figure mounts through the shared lesson runtime', () => {

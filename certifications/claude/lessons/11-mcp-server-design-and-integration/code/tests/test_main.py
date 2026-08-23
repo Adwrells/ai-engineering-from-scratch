@@ -10,6 +10,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 from main import (
     CLIENT_CAPABILITIES_KEY,
     CLIENT_INFO_KEY,
+    Capability,
     CURRENT_PROTOCOL_VERSION,
     MCPClient,
     MCPServer,
@@ -118,6 +119,19 @@ class MCPTests(unittest.TestCase):
             )
         )
         self.assertEqual(response["error"]["code"], -32602)
+
+    def test_capability_rejects_missing_and_unsupported_schema_types_explicitly(self):
+        for declared_type in (None, "number"):
+            with self.subTest(declared_type=declared_type):
+                schema = {"properties": {"topic": {}}}
+                if declared_type is not None:
+                    schema["properties"]["topic"]["type"] = declared_type
+                capability = Capability("review", "Review a topic.", schema, lambda args: args)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"unsupported schema type for topic: {declared_type!r}",
+                ):
+                    capability.validate_arguments({"topic": "release"})
 
     def test_resource_and_prompt_results_are_complete(self):
         listed = self.client.request("resources/list")

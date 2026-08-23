@@ -57,7 +57,13 @@ from pathlib import Path
 from typing import Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib import parse_frontmatter as _parse_frontmatter  # noqa: E402
+from _lib import (  # noqa: E402
+    BundleValidationError,
+    parse_frontmatter as _parse_frontmatter,
+    validate_repository_directory,
+    validate_repository_file,
+    validate_skill_bundle,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 PHASES_DIR = ROOT / "phases"
@@ -155,22 +161,10 @@ def parse_artifact(path: Path) -> dict[str, object] | None:
 
 
 def list_bundle_files(bundle_root: Path) -> list[str]:
-    if bundle_root.is_symlink() or not bundle_root.is_dir():
-        raise ValueError(f"skill bundle must be a regular directory: {bundle_root}")
-    resolved_bundle = bundle_root.resolve(strict=True)
-    resolved_root = ROOT.resolve(strict=True)
-    if not resolved_bundle.is_relative_to(resolved_root):
-        raise ValueError(f"skill bundle escapes the repository: {bundle_root}")
-    files: list[str] = []
-    for entry in sorted(bundle_root.rglob("*")):
-        if entry.is_symlink():
-            raise ValueError(f"skill bundle contains a symlink: {entry}")
-        if entry.is_dir():
-            continue
-        if not entry.is_file():
-            raise ValueError(f"skill bundle contains a non-regular file: {entry}")
-        files.append(entry.relative_to(bundle_root).as_posix())
-    return files
+    try:
+        return validate_skill_bundle(bundle_root, ROOT)
+    except BundleValidationError as error:
+        raise ValueError(str(error)) from error
 
 
 def parse_skill_bundle(bundle_root: Path) -> dict[str, object] | None:
@@ -211,11 +205,23 @@ def parse_skill_bundle(bundle_root: Path) -> dict[str, object] | None:
 def list_outputs(outputs_dir: Path) -> list[dict[str, object]]:
     if not outputs_dir.is_dir():
         return []
+    validate_repository_directory(outputs_dir, ROOT, "lesson outputs")
     artifacts: list[dict[str, object]] = []
     paths = sorted(outputs_dir.iterdir())
     for path in paths:
-        if path.suffix != ".md" or not path.is_file():
+        if path.suffix != ".md":
             continue
+        is_artifact = any(
+            path.stem.startswith(f"{artifact_type}-")
+            for artifact_type in ARTIFACT_TYPES
+        )
+        if not is_artifact:
+            continue
+        if path.is_symlink():
+            validate_repository_file(path, ROOT, "flat artifact")
+        if not path.is_file():
+            continue
+        validate_repository_file(path, ROOT, "flat artifact")
         record = parse_artifact(path)
         if record is not None:
             artifacts.append(record)

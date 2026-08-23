@@ -127,8 +127,9 @@ Its first lab gets a skill into a real host in about ten minutes.
   invocation, script, update, and uninstall evidence marked pending.
 - Skim [Lesson 01](01-the-tool-interface/) and [Lesson 05](05-tool-schema-design/)
   if tool contracts are new to you.
-- Complete [Lesson 15](15-mcp-security-tool-poisoning/) before Lesson 26, or
-  be able to explain tool poisoning and untrusted instructions.
+- Before Lesson 26, confirm that you can explain tool poisoning and untrusted
+  instructions. [Lesson 15](15-mcp-security-tool-poisoning/) is the optional
+  refresher for that preflight, not a sixth required lesson in this route.
 - [Lesson 23](23-capstone-tool-ecosystem/) is an optional systems capstone,
   not the next Agent Skills lesson after 22. Complete lessons 06 through 20
   before taking it.

@@ -1,11 +1,16 @@
 import copy
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import main
+MODULE_PATH = Path(__file__).resolve().parents[1] / "main.py"
+SPEC = importlib.util.spec_from_file_location("lesson30_main", MODULE_PATH)
+assert SPEC and SPEC.loader
+main = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = main
+SPEC.loader.exec_module(main)
 
 
 class RegistryAdmissionTests(unittest.TestCase):
@@ -222,6 +227,117 @@ class RegistryAdmissionTests(unittest.TestCase):
         )
         self.assertTrue(decision.allowed)
         self.assertEqual(decision.pin["source"]["kind"], "remote")
+
+    def test_cleartext_http_remote_is_rejected(self) -> None:
+        record = {
+            "name": "com.example/inventory",
+            "version": "1.0.0",
+            "description": "Remote inventory server",
+            "remotes": [
+                {
+                    "type": "streamable-http",
+                    "url": "http://mcp.example.com/mcp",
+                }
+            ],
+            "_meta": {main.PUBLISHER_META_KEY: {"tier": "internal-approved"}},
+        }
+        evidence = {
+            "kind": "remote",
+            "url": "http://mcp.example.com/mcp",
+            "transportType": "streamable-http",
+            "digest": main.digest({"tlsIdentity": "example.com", "route": "/mcp"}),
+            "verified": True,
+        }
+
+        decision = self.controller.admit(
+            record,
+            self.meta,
+            "com.example",
+            evidence,
+            main.sample_live("1.0.0"),
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertIn("record.remotes[0].url must be an HTTPS URL", decision.reasons)
+
+    def test_malformed_or_credentialed_remote_urls_are_rejected_without_crashing(self) -> None:
+        invalid_urls = {
+            "malformed IPv6": "https://[2001:db8::1/mcp",
+            "userinfo": "https://learner:secret@mcp.example.com/mcp",
+            "missing host": "https:///mcp",
+            "invalid port": "https://mcp.example.com:70000/mcp",
+            "fragment": "https://mcp.example.com/mcp#alternate",
+            "raw space": "https://mcp.example.com/m cp",
+            "raw tab": "https://mcp.example.com/mcp\t",
+            "encoded control": "https://mcp.example.com/mcp%0Aadmin",
+        }
+        for label, url in invalid_urls.items():
+            with self.subTest(label=label):
+                record = {
+                    "name": "com.example/inventory",
+                    "version": "1.0.0",
+                    "description": "Remote inventory server",
+                    "remotes": [{"type": "streamable-http", "url": url}],
+                    "_meta": {
+                        main.PUBLISHER_META_KEY: {"tier": "internal-approved"}
+                    },
+                }
+                evidence = {
+                    "kind": "remote",
+                    "url": url,
+                    "transportType": "streamable-http",
+                    "digest": main.digest({"tlsIdentity": "example.com"}),
+                    "verified": True,
+                }
+
+                decision = self.controller.admit(
+                    record,
+                    self.meta,
+                    "com.example",
+                    evidence,
+                    main.sample_live("1.0.0"),
+                )
+
+                self.assertFalse(decision.allowed)
+                self.assertIn(
+                    "record.remotes[0].url must be an HTTPS URL",
+                    decision.reasons,
+                )
+
+    def test_remote_urls_are_normalized_before_evidence_matching_and_pinning(self) -> None:
+        record = {
+            "name": "com.example/inventory",
+            "version": "1.0.0",
+            "description": "Remote inventory server",
+            "remotes": [
+                {
+                    "type": "streamable-http",
+                    "url": "https://MCP.Example.COM:443",
+                }
+            ],
+            "_meta": {main.PUBLISHER_META_KEY: {"tier": "internal-approved"}},
+        }
+        evidence = {
+            "kind": "remote",
+            "url": "https://mcp.example.com/",
+            "transportType": "streamable-http",
+            "digest": main.digest({"tlsIdentity": "example.com", "route": "/"}),
+            "verified": True,
+        }
+
+        decision = self.controller.admit(
+            record,
+            self.meta,
+            "com.example",
+            evidence,
+            main.sample_live("1.0.0"),
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(
+            decision.pin["source"]["url"],
+            "https://mcp.example.com/",
+        )
 
     def test_mutating_remote_record_after_admission_cannot_rewrite_pin(self) -> None:
         record = {

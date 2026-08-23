@@ -20,7 +20,7 @@ Produce:
 7. Retry contract. Require a fresh JSON-RPC id, original method and arguments, current `inputResponses`, per-request `_meta`, and exact `requestState` echo.
    An id-less notification never receives a JSON-RPC result or error; an accepted Streamable HTTP notification receives `202` with no body.
 8. Branch handling. Map `accept`, `decline`, and `cancel` to different safe outcomes.
-9. State protection. Bind HMAC or authenticated encryption to the authenticated principal, original argument digest, candidate set, operation phase, and expiry.
+9. State protection. Bind HMAC or authenticated encryption to the authenticated principal, original argument digest, candidate set, operation phase, expiry, and one-time nonce. Consume the nonce atomically in a bounded, TTL-pruned replay store shared by every handler instance.
 10. Final revalidation. Re-check authorization, live record state, and containment immediately before mutation.
 
 Hard rejects:

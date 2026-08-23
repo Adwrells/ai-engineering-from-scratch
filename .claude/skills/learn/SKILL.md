@@ -46,6 +46,32 @@ https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/<pat
 - Lesson list for a phase: the Contents section of `README.md` (each phase's
   table lists every lesson with its directory path and title)
 
+## Resume routing across course modes
+
+Before resolving an unnamed "resume" or "continue" request, inspect every
+supported state file in the current directory:
+
+- `LEARNING.md` belongs to `learn` for the full curriculum.
+- `MCP-LEARNING.md` belongs to `learn-mcp` for the Model Context Protocol
+  (MCP) route.
+- `MCP-ENGINEERING-LEARNING.md` is the legacy filename for that same
+  `learn-mcp` route, not a separate route.
+- `AGENT-SKILLS-LEARNING.md` belongs to `learn-agent-skills`.
+- `CLAUDE-CERTIFICATION.md` belongs to `claude-certification`.
+
+If the learner names a route, use its owner even when other state files exist.
+For an unnamed request, group the files by route owner. If exactly one route is
+represented, resume its owner. The two MCP filenames still represent one route;
+hand them to `learn-mcp`, which safely migrates or reports a collision. If two
+or more distinct routes are represented, list their learner-facing route names
+and ask which one to resume before selecting a lesson or changing any state.
+Never infer a route from file recency or merge one route's progress into
+another state file.
+
+Legacy runtimes may expose `learn-mcp-engineering` as an alias. Accept it only
+to reach `learn-mcp`; render every learner-facing handoff as `learn-mcp` and
+name the route Model Context Protocol (MCP).
+
 ## Focused MCP handoff
 
 If the learner asks for the Model Context Protocol (MCP) path, or either
@@ -58,13 +84,14 @@ the route order, wire checkpoints, and security gate.
 
 ## Focused Agent Skills handoff
 
-If the learner asks for the Agent Skills path, or
-`AGENT-SKILLS-LEARNING.md` exists and they ask to continue or resume learning,
-hand off to the portable skill `learn-agent-skills`. Its source of truth is
-`learning-paths/agent-skills.json`. Render any learner-facing handoff with the
-host invocation contract. Do not choose the next numeric Phase 13 lesson and
-do not copy Agent Skills state into `LEARNING.md`; the dedicated tutor owns the
-five-lesson order, real-host evidence, sandbox boundaries, and release gate.
+If the learner asks for the Agent Skills route, or
+`AGENT-SKILLS-LEARNING.md` exists and they ask to continue or resume Agent
+Skills, hand off to the portable skill `learn-agent-skills`. Its source of
+truth is `learning-paths/agent-skills.json`. Render the handoff with the host
+invocation contract. Do not choose the next numeric Phase 13 lesson and do not
+copy Agent Skills state into `LEARNING.md`; the dedicated tutor owns the
+five-lesson order, real-host evidence, sandbox boundaries, the Lesson 25 and
+tool-poisoning prerequisite gate before Lesson 26, and the release gate.
 
 ## Step 0 — Locate state
 

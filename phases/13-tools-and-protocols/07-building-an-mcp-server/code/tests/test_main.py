@@ -1,6 +1,13 @@
+import json
+import shutil
+import subprocess
 import unittest
+from pathlib import Path
 
 import main
+
+
+TYPESCRIPT_MAIN = Path(__file__).resolve().parents[1] / "main.ts"
 
 
 class McpServerTests(unittest.TestCase):
@@ -18,6 +25,53 @@ class McpServerTests(unittest.TestCase):
         message = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
         response = main.dispatch(message)
         self.assertEqual(response["error"]["code"], -32602)
+
+    def test_invalid_request_ids_are_rejected_at_the_boundary(self) -> None:
+        for request_id in (None, True, 1.5, {"nested": "id"}):
+            with self.subTest(request_id=request_id):
+                message = main.make_request(2, "tools/list")
+                message["id"] = request_id
+                response = main.dispatch(message)
+                self.assertEqual(response["id"], None)
+                self.assertEqual(response["error"]["code"], -32600)
+
+    def test_typescript_ids_are_limited_to_safe_integer_bounds(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is unavailable")
+        version = subprocess.run(
+            [node, "--version"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        major = int(version.removeprefix("v").split(".", 1)[0])
+        if major < 22:
+            self.skipTest("Node.js 22+ is required for TypeScript strip mode")
+
+        accepted = [-(2**53 - 1), 2**53 - 1]
+        rejected = [-(2**53), 2**53, 1.5, True]
+        messages = []
+        for request_id in accepted + rejected:
+            message = main.make_request(1, "tools/list")
+            message["id"] = request_id
+            messages.append(json.dumps(message, separators=(",", ":")))
+
+        completed = subprocess.run(
+            [node, "--no-warnings", "--experimental-strip-types", str(TYPESCRIPT_MAIN)],
+            input="\n".join(messages) + "\n",
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        responses = [json.loads(line) for line in completed.stdout.splitlines()]
+        self.assertEqual([response["id"] for response in responses[:2]], accepted)
+        for response in responses[2:]:
+            self.assertIsNone(response["id"])
+            self.assertEqual(response["error"]["code"], -32600)
 
     def test_unsupported_version_is_modern_error(self) -> None:
         response = main.dispatch(main.make_request(3, "tools/list", version="2027-01-01"))

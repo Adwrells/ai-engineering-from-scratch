@@ -269,6 +269,11 @@ class SandboxTests(unittest.TestCase):
             {"kind": "write", "target": "out.txt", "approved": "false"},
             self.workspace,
         )
+        malformed_approval_kinds = module.review(
+            {**policy, "approvalKinds": "write"},
+            {"kind": "write", "target": "out.txt"},
+            self.workspace,
+        )
         self.assertEqual(secret["rule"], "secret-review")
         self.assertEqual(untrusted["verdict"], "require-approval")
         self.assertEqual(userinfo["rule"], "network-shape")
@@ -277,6 +282,8 @@ class SandboxTests(unittest.TestCase):
         self.assertEqual(wrong_port["rule"], "network-allowlist")
         self.assertEqual(disguised["rule"], "command-review")
         self.assertEqual(string_false["rule"], "boolean-shape")
+        self.assertEqual(malformed_approval_kinds["rule"], "policy-shape")
+        self.assertEqual(malformed_approval_kinds["verdict"], "deny")
 
 
 if __name__ == "__main__":

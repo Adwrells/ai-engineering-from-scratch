@@ -86,6 +86,35 @@ class SkillArtifactBundleTest(unittest.TestCase):
             self.assertEqual((artifact.phase, artifact.lesson), (14, 22))
             self.assertEqual(artifact.source, bundle / "SKILL.md")
             self.assertEqual(artifact.bundle_root, bundle)
+            self.assertEqual(
+                artifact.bundle_files,
+                ["SKILL.md", "references/not-an-artifact.md"],
+            )
+
+    def test_bundle_file_lists_share_sorted_posix_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outputs = self.make_outputs(root)
+            bundle = outputs / "release-gate"
+            write_markdown(
+                bundle / "SKILL.md",
+                name="release-gate",
+                description="Gate a release.",
+                version="2.1.0",
+            )
+            (bundle / "sub").mkdir()
+            (bundle / "sub/file.txt").write_text("nested\n", encoding="utf-8")
+            (bundle / "sub.md").write_text("sibling\n", encoding="utf-8")
+
+            with patch.object(build_catalog, "ROOT", root), patch.object(
+                install_skills, "ROOT", root
+            ):
+                catalog_files = build_catalog.list_bundle_files(bundle)
+                installer_files = install_skills.validate_bundle(bundle)
+
+            expected = ["SKILL.md", "sub.md", "sub/file.txt"]
+            self.assertEqual(catalog_files, expected)
+            self.assertEqual(installer_files, expected)
 
     def test_installer_copies_the_complete_bundle_to_one_skill_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -212,6 +241,36 @@ class SkillArtifactBundleTest(unittest.TestCase):
                 (target / "flat-reviewer/SKILL.md").read_bytes(), source.read_bytes()
             )
 
+    def test_bundle_targets_resolve_for_every_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outputs = self.make_outputs(root)
+            bundle = outputs / "release-gate"
+            write_markdown(
+                bundle / "SKILL.md",
+                name="release-gate",
+                description="Gate a release.",
+                version="2.1.0",
+            )
+            target = root / "installed"
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ):
+                artifact = list(install_skills.discover_artifacts())[0]
+                self.assertEqual(
+                    install_skills.target_path(artifact, target, "flat"),
+                    target / "release-gate",
+                )
+                self.assertEqual(
+                    install_skills.target_path(artifact, target, "by-phase"),
+                    target / "phase-14/release-gate",
+                )
+                self.assertEqual(
+                    install_skills.target_path(artifact, target, "skills"),
+                    target / "release-gate",
+                )
+
     def test_duplicate_flat_and_bundle_names_choose_the_flat_artifact_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -282,6 +341,51 @@ class SkillArtifactBundleTest(unittest.TestCase):
 
             self.assertFalse(target.exists())
 
+    def test_installer_revalidates_a_staged_bundle_after_source_swap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outputs = self.make_outputs(root)
+            bundle = outputs / "release-gate"
+            write_markdown(
+                bundle / "SKILL.md",
+                name="release-gate",
+                description="Gate a release.",
+                version="2.1.0",
+            )
+            references = bundle / "references"
+            references.mkdir()
+            policy = references / "policy.md"
+            policy.write_text("approved policy\n", encoding="utf-8")
+            outside = root / "private.txt"
+            outside.write_text("must not be installed\n", encoding="utf-8")
+            target = root / "installed"
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ):
+                artifacts = list(install_skills.discover_artifacts())
+                plan = install_skills.build_plan(artifacts, target, "skills", False)
+                real_copytree = install_skills.shutil.copytree
+
+                def swap_then_copy(source, destination, *args, **kwargs):
+                    policy.unlink()
+                    policy.symlink_to(outside)
+                    return real_copytree(source, destination, *args, **kwargs)
+
+                with patch.object(
+                    install_skills.shutil,
+                    "copytree",
+                    side_effect=swap_then_copy,
+                ):
+                    with self.assertRaisesRegex(
+                        install_skills.UnsafeBundleError,
+                        "unsafe file entry",
+                    ):
+                        install_skills.apply_plan(plan)
+
+            self.assertFalse((target / "release-gate").exists())
+            self.assertEqual(list(target.iterdir()), [])
+
     def test_installer_rejects_a_bundle_reached_through_an_escaping_parent_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_root = Path(tmp)
@@ -308,6 +412,85 @@ class SkillArtifactBundleTest(unittest.TestCase):
                     list(install_skills.discover_artifacts())
 
             self.assertFalse(target.exists())
+
+    def test_installer_rejects_a_flat_only_escaping_outputs_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            root = temp_root / "workspace"
+            lesson = root / "phases/14-agent-engineering/22-skill-runtime"
+            lesson.mkdir(parents=True)
+            outside_outputs = temp_root / "outside-outputs"
+            write_markdown(
+                outside_outputs / "skill-leaked-reviewer.md",
+                name="leaked-reviewer",
+                description="This artifact is outside the repository.",
+                version="1.0.0",
+            )
+            (lesson / "outputs").symlink_to(
+                outside_outputs, target_is_directory=True
+            )
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ), patch.object(
+                install_skills, "artifact_from_markdown"
+            ) as parse_artifact:
+                with self.assertRaisesRegex(ValueError, "lesson outputs escapes"):
+                    list(install_skills.discover_artifacts())
+
+            parse_artifact.assert_not_called()
+
+    def test_installer_rejects_an_in_repository_outputs_directory_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lesson = root / "phases/14-agent-engineering/22-skill-runtime"
+            lesson.mkdir(parents=True)
+            shared_outputs = root / "shared-outputs"
+            write_markdown(
+                shared_outputs / "skill-shared-reviewer.md",
+                name="shared-reviewer",
+                description="This artifact is in the repository but behind a symlink.",
+                version="1.0.0",
+            )
+            (lesson / "outputs").symlink_to(
+                shared_outputs, target_is_directory=True
+            )
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ), patch.object(
+                install_skills, "artifact_from_markdown"
+            ) as parse_artifact:
+                with self.assertRaisesRegex(
+                    ValueError, "lesson outputs must be a regular directory"
+                ):
+                    list(install_skills.discover_artifacts())
+
+            parse_artifact.assert_not_called()
+
+    def test_installer_rejects_a_direct_flat_artifact_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            root = temp_root / "workspace"
+            outputs = self.make_outputs(root)
+            outside = temp_root / "skill-outside.md"
+            write_markdown(
+                outside,
+                name="outside",
+                description="This artifact is outside the repository.",
+                version="1.0.0",
+            )
+            (outputs / "skill-leaked-reviewer.md").symlink_to(outside)
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ), patch.object(
+                install_skills, "artifact_from_markdown"
+            ) as parse_artifact:
+                with self.assertRaisesRegex(ValueError, "flat artifact must be a regular file"):
+                    list(install_skills.discover_artifacts())
+
+            parse_artifact.assert_not_called()
 
     def test_dry_run_rejects_unsafe_bundle_before_previewing_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -501,6 +684,79 @@ class SkillArtifactBundleTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "escapes the repository"):
                     build_catalog.build_catalog()
 
+    def test_catalog_rejects_a_flat_only_escaping_outputs_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            root = temp_root / "workspace"
+            lesson = root / "phases/14-agent-engineering/22-skill-runtime"
+            lesson.mkdir(parents=True)
+            outside_outputs = temp_root / "outside-outputs"
+            write_markdown(
+                outside_outputs / "skill-leaked-reviewer.md",
+                name="leaked-reviewer",
+                description="This artifact is outside the repository.",
+                version="1.0.0",
+            )
+            (lesson / "outputs").symlink_to(
+                outside_outputs, target_is_directory=True
+            )
+
+            with patch.object(build_catalog, "ROOT", root), patch.object(
+                build_catalog, "PHASES_DIR", root / "phases"
+            ), patch.object(build_catalog, "parse_artifact") as parse_artifact:
+                with self.assertRaisesRegex(ValueError, "lesson outputs escapes"):
+                    build_catalog.build_catalog()
+
+            parse_artifact.assert_not_called()
+
+    def test_catalog_rejects_an_in_repository_outputs_directory_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lesson = root / "phases/14-agent-engineering/22-skill-runtime"
+            lesson.mkdir(parents=True)
+            shared_outputs = root / "shared-outputs"
+            write_markdown(
+                shared_outputs / "skill-shared-reviewer.md",
+                name="shared-reviewer",
+                description="This artifact is in the repository but behind a symlink.",
+                version="1.0.0",
+            )
+            (lesson / "outputs").symlink_to(
+                shared_outputs, target_is_directory=True
+            )
+
+            with patch.object(build_catalog, "ROOT", root), patch.object(
+                build_catalog, "PHASES_DIR", root / "phases"
+            ), patch.object(build_catalog, "parse_artifact") as parse_artifact:
+                with self.assertRaisesRegex(
+                    ValueError, "lesson outputs must be a regular directory"
+                ):
+                    build_catalog.build_catalog()
+
+            parse_artifact.assert_not_called()
+
+    def test_catalog_rejects_a_direct_flat_artifact_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            root = temp_root / "workspace"
+            outputs = self.make_outputs(root)
+            outside = temp_root / "skill-outside.md"
+            write_markdown(
+                outside,
+                name="outside",
+                description="This artifact is outside the repository.",
+                version="1.0.0",
+            )
+            (outputs / "skill-leaked-reviewer.md").symlink_to(outside)
+
+            with patch.object(build_catalog, "ROOT", root), patch.object(
+                build_catalog, "PHASES_DIR", root / "phases"
+            ), patch.object(build_catalog, "parse_artifact") as parse_artifact:
+                with self.assertRaisesRegex(ValueError, "flat artifact must be a regular file"):
+                    build_catalog.build_catalog()
+
+            parse_artifact.assert_not_called()
+
     def test_manifest_describes_the_single_artifact_that_was_installed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -575,6 +831,45 @@ class SkillArtifactBundleTest(unittest.TestCase):
                     "bundle_path": "phases/14-agent-engineering/22-skill-runtime/outputs/release-gate",
                     "files": ["SKILL.md", "evals/cases.json"],
                 },
+            )
+
+    def test_manifest_uses_cached_bundle_files_after_install(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outputs = self.make_outputs(root)
+            bundle = outputs / "release-gate"
+            write_markdown(
+                bundle / "SKILL.md",
+                name="release-gate",
+                description="Gate a release.",
+                version="2.1.0",
+            )
+            (bundle / "evals").mkdir()
+            (bundle / "evals/cases.json").write_text("[]\n", encoding="utf-8")
+            target = root / "installed"
+
+            with patch.object(install_skills, "ROOT", root), patch.object(
+                install_skills, "PHASES_DIR", root / "phases"
+            ):
+                artifacts = list(install_skills.discover_artifacts())
+                plan = install_skills.build_plan(artifacts, target, "skills", False)
+                install_skills.apply_plan(plan)
+                (bundle / "added-after-install.txt").write_text(
+                    "late mutation\n", encoding="utf-8"
+                )
+                with patch.object(
+                    install_skills,
+                    "validate_bundle",
+                    side_effect=AssertionError("manifest re-walked source bundle"),
+                ):
+                    manifest_path = install_skills.write_manifest(
+                        target, artifacts, "skills"
+                    )
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                manifest["artifacts"][0]["files"],
+                ["SKILL.md", "evals/cases.json"],
             )
 
 

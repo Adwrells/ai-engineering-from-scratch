@@ -142,11 +142,13 @@ class CorePolicyAdapter:
             if request.depth < 1 or request.depth > self.policy.max_skill_depth:
                 return False, "skill composition depth limit"
             return True, "skill caller allowlist and depth policy"
-        allowed = (
-            self.policy.allow_programmatic
-            and skill.name in self.policy.harness_allowlist
-        )
-        return allowed, "programmatic activation policy and allowlist"
+        if actor is Actor.HARNESS:
+            allowed = (
+                self.policy.allow_programmatic
+                and skill.name in self.policy.harness_allowlist
+            )
+            return allowed, "programmatic activation policy and allowlist"
+        return False, f"unknown actor {actor.value!r} has no activation policy"
 
 
 def _extension_false(value: object) -> bool:

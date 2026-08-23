@@ -60,7 +60,7 @@
         "To make JSON smaller"
       ],
       "correct": 2,
-      "explanation": "requestState round-trips through an untrusted peer, so the server must detect tampering and context changes."
+      "explanation": "requestState round-trips through an untrusted peer, so the server must detect tampering and context changes. A shared atomic nonce claim prevents reuse across handler instances."
     },
     {
       "stage": "post",

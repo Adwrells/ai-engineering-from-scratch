@@ -9,8 +9,10 @@ tools/list. Lesson 09 supplies the complete Streamable HTTP adapter.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -27,6 +29,16 @@ RESOURCE_METADATA_URI = "https://notes.example.com/.well-known/oauth-protected-r
 ISSUER = "https://auth.example.com"
 CLIENT_METADATA_URL = "https://client.example.com/oauth/metadata.json"
 SERVER_INFO = {"name": "notes-server", "version": "2.0.0"}
+BASE64_SENTINEL_PREFIX = "=?base64?"
+BASE64_SENTINEL_SUFFIX = "?="
+FORBIDDEN_CIMD_SECRET_FIELDS = {
+    "client_secret",
+    "client_secret_expires_at",
+    "private_key",
+    "private_key_jwk",
+    "private_key_pem",
+}
+PRIVATE_JWK_FIELDS = {"d", "p", "q", "dp", "dq", "qi", "oth", "k"}
 
 TOOL_DESCRIPTORS = [
     {
@@ -90,13 +102,47 @@ def request_meta() -> dict[str, Any]:
     }
 
 
+def encode_mcp_header_value(value: str) -> str:
+    is_safe = (
+        value.isascii()
+        and value == value.strip()
+        and all(0x20 <= ord(character) <= 0x7E for character in value)
+        and not (
+            value.startswith(BASE64_SENTINEL_PREFIX)
+            and value.endswith(BASE64_SENTINEL_SUFFIX)
+        )
+    )
+    if is_safe:
+        return value
+    payload = base64.b64encode(value.encode("utf-8")).decode("ascii")
+    return f"{BASE64_SENTINEL_PREFIX}{payload}{BASE64_SENTINEL_SUFFIX}"
+
+
+def decode_mcp_header_value(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ProtocolError(-32020, "Mcp-Name header is missing or malformed")
+    if value.startswith(BASE64_SENTINEL_PREFIX) and value.endswith(BASE64_SENTINEL_SUFFIX):
+        payload = value[len(BASE64_SENTINEL_PREFIX):-len(BASE64_SENTINEL_SUFFIX)]
+        try:
+            return base64.b64decode(payload, validate=True).decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
+            raise ProtocolError(-32020, "Mcp-Name header has invalid Base64 encoding") from exc
+    if (
+        not value.isascii()
+        or value != value.strip()
+        or any(not 0x20 <= ord(character) <= 0x7E for character in value)
+    ):
+        raise ProtocolError(-32020, "Mcp-Name header is not safely encoded")
+    return value
+
+
 def make_mcp_request(request_id: int, tool: str, arguments: dict[str, Any] | None = None):
     params = {"name": tool, "arguments": dict(arguments or {}), "_meta": request_meta()}
     body = {"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": params}
     headers = {
         "MCP-Protocol-Version": PROTOCOL_VERSION,
         "Mcp-Method": "tools/call",
-        "Mcp-Name": tool,
+        "Mcp-Name": encode_mcp_header_value(tool),
     }
     return body, headers
 
@@ -136,6 +182,11 @@ class AuthorizationServer:
     supports_dcr: bool = True
     clients: dict[str, dict[str, Any]] = field(default_factory=dict)
     pending_codes: dict[str, dict[str, Any]] = field(default_factory=dict)
+    _pending_codes_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        init=False,
+        repr=False,
+    )
 
     def metadata(self) -> dict[str, Any]:
         metadata = {
@@ -160,9 +211,38 @@ class AuthorizationServer:
         redirect_uris = metadata.get("redirect_uris")
         if not isinstance(redirect_uris, list) or not redirect_uris:
             raise ValueError("redirect_uris is required")
-        if application_type == "web":
-            for redirect_uri in redirect_uris:
+        parsed_redirects = []
+        for redirect_uri in redirect_uris:
+            if (
+                not isinstance(redirect_uri, str)
+                or not redirect_uri
+                or redirect_uri != redirect_uri.strip()
+                or any(character.isspace() for character in redirect_uri)
+            ):
+                raise ValueError(
+                    "redirect_uris entries must be non-empty absolute URIs without fragments"
+                )
+            try:
                 parsed = urlparse(redirect_uri)
+                hostname = parsed.hostname
+            except ValueError as exc:
+                raise ValueError(
+                    "redirect_uris entries must be non-empty absolute URIs without fragments"
+                ) from exc
+            if (
+                not parsed.scheme
+                or parsed.fragment
+                or (
+                    parsed.scheme in {"http", "https"}
+                    and (not parsed.netloc or hostname is None)
+                )
+            ):
+                raise ValueError(
+                    "redirect_uris entries must be non-empty absolute URIs without fragments"
+                )
+            parsed_redirects.append(parsed)
+        if application_type == "web":
+            for parsed in parsed_redirects:
                 if parsed.scheme != "https" or parsed.hostname in {"localhost", "127.0.0.1"}:
                     raise ValueError("web redirect URIs must use remote HTTPS")
 
@@ -172,10 +252,32 @@ class AuthorizationServer:
         parsed = urlparse(metadata_url)
         if parsed.scheme != "https" or not parsed.netloc or parsed.path in {"", "/"}:
             raise ValueError("CIMD client_id must be an HTTPS URL with a path")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("CIMD client_id must not contain userinfo")
+        if parsed.fragment:
+            raise ValueError("CIMD client_id must not contain a fragment")
+        if any(segment in {".", ".."} for segment in parsed.path.split("/")):
+            raise ValueError("CIMD client_id must not contain dot path segments")
         if document.get("client_id") != metadata_url:
             raise ValueError("CIMD client_id must equal its metadata URL")
         if not isinstance(document.get("client_name"), str) or not document["client_name"]:
             raise ValueError("client_name is required")
+        auth_method = document.get("token_endpoint_auth_method")
+        if auth_method is not None and not isinstance(auth_method, str):
+            raise ValueError("token_endpoint_auth_method must be a string")
+        if isinstance(auth_method, str) and auth_method.startswith("client_secret"):
+            raise ValueError("CIMD must not use shared-secret client authentication")
+        forbidden_fields = FORBIDDEN_CIMD_SECRET_FIELDS.intersection(document)
+        if forbidden_fields:
+            raise ValueError("CIMD must not contain client secrets or private keys")
+        jwks = document.get("jwks")
+        if isinstance(jwks, dict):
+            keys = jwks.get("keys", [])
+            if isinstance(keys, list) and any(
+                isinstance(key, dict) and PRIVATE_JWK_FIELDS.intersection(key)
+                for key in keys
+            ):
+                raise ValueError("CIMD jwks must contain public keys only")
         self._validate_application(document, require_application_type=False)
         self.clients[metadata_url] = {**document, "enrollment": "cimd"}
         return metadata_url
@@ -217,18 +319,30 @@ class AuthorizationServer:
         self,
         *,
         code: str,
+        client_id: str,
         verifier: str,
         redirect_uri: str,
         resource: str,
     ) -> Token:
-        record = self.pending_codes.pop(code, None)
-        if record is None or record["expires_at"] < time.time():
-            raise ValueError("invalid authorization code")
-        if record["redirect_uri"] != redirect_uri or record["resource"] != resource:
-            raise ValueError("redirect_uri or resource mismatch")
-        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-        if not secrets.compare_digest(challenge, record["challenge"]):
-            raise ValueError("PKCE mismatch")
+        with self._pending_codes_lock:
+            record = self.pending_codes.get(code)
+            if record is None:
+                raise ValueError("invalid authorization code")
+            if record["expires_at"] <= time.time():
+                self.pending_codes.pop(code, None)
+                raise ValueError("invalid authorization code")
+            if record["client_id"] != client_id:
+                raise ValueError("client_id mismatch")
+            if record["redirect_uri"] != redirect_uri:
+                raise ValueError("redirect_uri mismatch")
+            if record["resource"] != resource:
+                raise ValueError("resource mismatch")
+            challenge = base64.urlsafe_b64encode(
+                hashlib.sha256(verifier.encode()).digest()
+            ).rstrip(b"=").decode()
+            if not secrets.compare_digest(challenge, record["challenge"]):
+                raise ValueError("PKCE mismatch")
+            self.pending_codes.pop(code)
         return Token(
             value=f"tok_{secrets.token_hex(12)}",
             issuer=self.issuer,
@@ -293,7 +407,8 @@ class ResourceServer:
             raise ProtocolError(-32020, "Mcp-Method header mismatch")
         if method in {"tools/call", "resources/read", "prompts/get"}:
             expected_name = params.get("name") or params.get("uri")
-            if headers.get("Mcp-Name") != expected_name:
+            supplied_name = decode_mcp_header_value(headers.get("Mcp-Name"))
+            if supplied_name != expected_name:
                 raise ProtocolError(-32020, "Mcp-Name header mismatch")
         if requested_version != PROTOCOL_VERSION:
             raise ProtocolError(
@@ -458,6 +573,7 @@ class Client:
             raise ValueError("authorization response issuer mismatch")
         token = auth.exchange(
             code=response["code"],
+            client_id=client_id,
             verifier=verifier,
             redirect_uri=self.redirect_uri,
             resource=resource,

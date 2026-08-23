@@ -1,9 +1,16 @@
+import http.client
 import json
+import subprocess
+import sys
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import main
+
+
+MAIN_PATH = Path(__file__).resolve().parents[1] / "main.py"
 
 
 class StreamableHttpTests(unittest.TestCase):
@@ -17,6 +24,28 @@ class StreamableHttpTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
 
+    def raw_post(
+        self,
+        headers: list[tuple[str, str]],
+        body: bytes = b"",
+    ) -> tuple[int, dict]:
+        connection = http.client.HTTPConnection(
+            "127.0.0.1",
+            self.server.server_port,
+            timeout=3,
+        )
+        connection.putrequest("POST", "/mcp")
+        for name, value in headers:
+            connection.putheader(name, value)
+        connection.endheaders()
+        if body:
+            connection.send(body)
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        status = response.status
+        connection.close()
+        return status, payload
+
     def test_invalid_origin_is_rejected(self) -> None:
         message = main.make_request(1, "server/discover")
         status, _, payload = main.post(
@@ -26,6 +55,28 @@ class StreamableHttpTests(unittest.TestCase):
         )
         self.assertEqual(status, 403)
         self.assertEqual(payload["error"], "Origin not allowed")
+
+    def test_duplicate_origin_is_rejected_before_allowlist_evaluation(self) -> None:
+        message = main.make_request(11, "server/discover")
+        body = json.dumps(message).encode("utf-8")
+        headers = [
+            (name, value)
+            for name, value in main.http_headers_for(message).items()
+            if name.lower() != "origin"
+        ]
+        headers.extend(
+            [
+                ("Origin", "http://localhost"),
+                ("Origin", "http://evil.example"),
+                ("Content-Length", str(len(body))),
+            ]
+        )
+
+        status, payload = self.raw_post(headers, body)
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], -32020)
+        self.assertEqual(payload["error"]["message"], "Duplicate Origin header")
 
     def test_discovery_has_no_protocol_session(self) -> None:
         message = main.make_request(2, "server/discover")
@@ -54,6 +105,73 @@ class StreamableHttpTests(unittest.TestCase):
         status, _, payload = main.post(self.url, message, headers)
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], -32020)
+
+    def test_conflicting_duplicate_name_headers_are_rejected(self) -> None:
+        message = main.make_request(
+            41,
+            "tools/call",
+            {"name": "ping", "arguments": {}},
+        )
+        body = json.dumps(message).encode("utf-8")
+        headers = [
+            (name, value)
+            for name, value in main.http_headers_for(message).items()
+            if name.lower() != "mcp-name"
+        ]
+        headers.extend(
+            [
+                ("Mcp-Name", "ping"),
+                ("Mcp-Name", "different-tool"),
+                ("Content-Length", str(len(body))),
+            ]
+        )
+        status, payload = self.raw_post(headers, body)
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], -32020)
+
+    def test_invalid_and_oversized_content_lengths_are_rejected(self) -> None:
+        message = main.make_request(42, "tools/list")
+        base_headers = list(main.http_headers_for(message).items())
+        for content_length in (None, "not-a-number", "-1", str(main.MAX_REQUEST_BYTES + 1)):
+            with self.subTest(content_length=content_length):
+                headers = base_headers.copy()
+                if content_length is not None:
+                    headers.append(("Content-Length", content_length))
+                status, payload = self.raw_post(headers)
+                self.assertEqual(status, 400)
+                self.assertEqual(payload["error"]["code"], -32700)
+
+    def test_conflicting_content_lengths_are_rejected_before_body_read(self) -> None:
+        message = main.make_request(43, "tools/list")
+        headers = list(main.http_headers_for(message).items())
+        headers.extend(
+            [
+                ("Content-Length", "10"),
+                ("Content-Length", "20"),
+            ]
+        )
+
+        status, payload = self.raw_post(headers)
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], -32700)
+        self.assertIn("duplicate Content-Length", payload["error"]["data"]["detail"])
+
+    def test_content_length_with_transfer_encoding_is_rejected_before_body_read(self) -> None:
+        message = main.make_request(44, "tools/list")
+        headers = list(main.http_headers_for(message).items())
+        headers.extend(
+            [
+                ("Content-Length", "10"),
+                ("Transfer-Encoding", "chunked"),
+            ]
+        )
+
+        status, payload = self.raw_post(headers)
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], -32700)
+        self.assertIn("Transfer-Encoding", payload["error"]["data"]["detail"])
 
     def test_unsupported_matching_version_advertises_supported(self) -> None:
         message = main.make_request(5, "tools/list", version="2027-01-01")
@@ -138,6 +256,18 @@ class StreamableHttpTests(unittest.TestCase):
             payloads[-1]["result"]["_meta"][main.SUBSCRIPTION_ID_KEY],
             "listen-8",
         )
+
+    def test_default_command_runs_the_finite_probe(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, str(MAIN_PATH)],
+            cwd=MAIN_PATH.parent,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("MCP 2026-07-28 Streamable HTTP probe", completed.stdout)
 
 
 if __name__ == "__main__":

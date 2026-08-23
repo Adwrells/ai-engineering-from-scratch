@@ -14,7 +14,10 @@ import hashlib
 import hmac
 import json
 import posixpath
+import secrets
+import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -70,6 +73,45 @@ class McpError(Exception):
     code: int
     message: str
     data: dict[str, Any] | None = None
+
+
+class ReplayStore:
+    def __init__(
+        self,
+        *,
+        max_entries: int = 1_000,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if type(max_entries) is not int or max_entries < 1:
+            raise ValueError("max_entries must be a positive integer")
+        self.max_entries = max_entries
+        self._clock = clock
+        self._consumed: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def claim_and_consume(
+        self,
+        nonce: str,
+        *,
+        expires_at: float,
+        operation: Callable[[], Any],
+    ) -> Any:
+        with self._lock:
+            now = self._clock()
+            self._consumed = {
+                key: expiry
+                for key, expiry in self._consumed.items()
+                if expiry > now
+            }
+            if expires_at <= now:
+                raise McpError(-32602, "requestState expired")
+            if nonce in self._consumed:
+                raise McpError(-32602, "requestState was already consumed")
+            if len(self._consumed) >= self.max_entries:
+                raise McpError(-32023, "replay protection capacity exhausted")
+            result = operation()
+            self._consumed[nonce] = expires_at
+            return result
 
 
 def request_meta(*, elicitation: bool = True) -> dict[str, Any]:
@@ -189,15 +231,24 @@ def verify_request_state(
         raise McpError(-32602, "requestState method mismatch")
     if state.get("argumentsDigest") != _arguments_digest(arguments):
         raise McpError(-32602, "requestState arguments mismatch")
-    if int(state.get("expiresAt", 0)) < (int(time.time()) if now is None else now):
+    expires_at = state.get("expiresAt")
+    if type(expires_at) not in (int, float):
+        raise McpError(-32602, "invalid requestState expiry")
+    if expires_at <= (time.time() if now is None else now):
         raise McpError(-32602, "requestState expired")
     return state
 
 
 class NotesServer:
-    def __init__(self) -> None:
-        self.notes = copy.deepcopy(DEFAULT_NOTES)
+    def __init__(
+        self,
+        *,
+        notes: dict[str, dict[str, str]] | None = None,
+        replay_store: ReplayStore | None = None,
+    ) -> None:
+        self.notes = copy.deepcopy(DEFAULT_NOTES) if notes is None else notes
         self.authorized_workspaces = {"file:///Users/alice/Documents/Notes"}
+        self.replay_store = replay_store if replay_store is not None else ReplayStore()
 
     def server_discover(self, params: dict[str, Any]) -> dict[str, Any]:
         validate_request_meta(params)
@@ -237,6 +288,7 @@ class NotesServer:
             "method": "tools/call",
             "argumentsDigest": _arguments_digest(arguments),
             "candidateIds": candidate_ids,
+            "nonce": secrets.token_hex(16),
             "expiresAt": int(time.time()) + 300,
         }
         return {
@@ -262,6 +314,28 @@ class NotesServer:
             "_meta": _server_meta(),
         }
 
+    def _delete_note_once(
+        self,
+        *,
+        nonce: str,
+        expires_at: float,
+        note_id: str,
+        workspace_uri: str,
+    ) -> None:
+        def delete_note() -> None:
+            note = self.notes.get(note_id)
+            if note is None:
+                raise McpError(-32602, "selected note no longer exists")
+            if not uri_within_workspace(workspace_uri, note["uri"]):
+                raise McpError(-32602, "selected note is outside workspace")
+            del self.notes[note_id]
+
+        self.replay_store.claim_and_consume(
+            nonce,
+            expires_at=expires_at,
+            operation=delete_note,
+        )
+
     def tools_call(self, params: dict[str, Any], *, principal: str) -> dict[str, Any]:
         meta = validate_request_meta(params)
         if params.get("name") != "notes_delete":
@@ -282,8 +356,14 @@ class NotesServer:
                 {"requiredCapabilities": {"elicitation": {"form": {}}}},
             )
 
-        state_token = params.get("requestState")
-        if state_token is None:
+        has_state = "requestState" in params
+        has_responses = "inputResponses" in params
+        if has_state != has_responses:
+            raise McpError(
+                -32602,
+                "requestState and inputResponses must be provided together",
+            )
+        if not has_state:
             candidates = [
                 {"id": note_id, **note}
                 for note_id, note in self.notes.items()
@@ -301,6 +381,7 @@ class NotesServer:
                 arguments=arguments,
             )
 
+        state_token = params["requestState"]
         if not isinstance(state_token, str):
             raise McpError(-32602, "requestState must be a string")
         state = verify_request_state(
@@ -310,16 +391,31 @@ class NotesServer:
         )
         if state.get("phase") != "confirm_delete":
             raise McpError(-32602, "unknown requestState phase")
-        responses = params.get("inputResponses")
+        nonce = state.get("nonce")
+        if not isinstance(nonce, str) or not nonce:
+            raise McpError(-32602, "requestState nonce is missing")
+        expires_at = state["expiresAt"]
+        responses = params["inputResponses"]
         if not isinstance(responses, dict):
             raise McpError(-32602, "inputResponses must be an object")
         answer = responses.get("delete_choice")
         if not isinstance(answer, dict):
             raise McpError(-32602, "missing delete_choice response")
         action = answer.get("action")
-        if action in {"decline", "cancel"}:
+        if action == "cancel":
             return complete(
                 content=[{"type": "text", "text": "deletion cancelled"}],
+                structuredContent={"deleted": False},
+                isError=False,
+            )
+        if action == "decline":
+            self.replay_store.claim_and_consume(
+                nonce,
+                expires_at=expires_at,
+                operation=lambda: None,
+            )
+            return complete(
+                content=[{"type": "text", "text": "deletion declined"}],
                 structuredContent={"deleted": False},
                 isError=False,
             )
@@ -329,12 +425,12 @@ class NotesServer:
         note_id = content.get("note_id")
         if content.get("confirm") is not True or note_id not in state["candidateIds"]:
             raise McpError(-32602, "invalid deletion confirmation")
-        note = self.notes.get(note_id)
-        if note is None:
-            raise McpError(-32602, "selected note no longer exists")
-        if not uri_within_workspace(workspace_uri, note["uri"]):
-            raise McpError(-32602, "selected note is outside workspace")
-        del self.notes[note_id]
+        self._delete_note_once(
+            nonce=nonce,
+            expires_at=expires_at,
+            note_id=note_id,
+            workspace_uri=workspace_uri,
+        )
         return complete(
             content=[{"type": "text", "text": f"deleted {note_id}"}],
             structuredContent={"deleted": True, "noteId": note_id},

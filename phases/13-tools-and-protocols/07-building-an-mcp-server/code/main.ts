@@ -26,7 +26,7 @@ type JsonObject = Record<string, any>;
 type Note = { title: string; body: string; tag: string };
 type JsonRpcRequest = {
   jsonrpc: "2.0";
-  id?: number | string | null;
+  id?: number | string;
   method: string;
   params?: JsonObject;
 };
@@ -92,13 +92,22 @@ const PROMPTS: JsonObject[] = [
 ];
 
 class RpcProblem extends Error {
+  readonly code: number;
+  readonly data?: unknown;
+
   constructor(
-    readonly code: number,
+    code: number,
     message: string,
-    readonly data?: unknown,
+    data?: unknown,
   ) {
     super(message);
+    this.code = code;
+    this.data = data;
   }
+}
+
+function isValidRequestId(value: unknown): value is number | string {
+  return typeof value === "string" || (typeof value === "number" && Number.isSafeInteger(value));
 }
 
 function requestMeta(version = PROTOCOL_VERSION, capabilities: JsonObject = {}): JsonObject {
@@ -149,6 +158,10 @@ function complete(
 function validateRequest(message: JsonRpcRequest): void {
   if (message.jsonrpc !== "2.0" || typeof message.method !== "string") {
     throw new RpcProblem(-32600, "Invalid Request");
+  }
+  const requestId: unknown = message.id;
+  if (requestId !== undefined && !isValidRequestId(requestId)) {
+    throw new RpcProblem(-32600, "id must be a string or integer");
   }
   const params = message.params;
   if (!params || typeof params !== "object" || Array.isArray(params)) {
@@ -339,14 +352,15 @@ const HANDLERS: Record<string, (params: JsonObject) => JsonObject> = {
 function dispatch(message: JsonRpcRequest): JsonRpcResponse | null {
   if (message.id === undefined) return null;
   const id = message.id;
+  const errorId = isValidRequestId(id) ? id : null;
   try {
     validateRequest(message);
     const handler = HANDLERS[message.method];
     if (!handler) throw new RpcProblem(-32601, `Method not found: ${message.method}`);
     return { jsonrpc: "2.0", id, result: handler(message.params ?? {}) };
   } catch (error) {
-    if (error instanceof RpcProblem) return rpcError(id, error.code, error.message, error.data);
-    return rpcError(id, -32603, "Internal error", { detail: String(error) });
+    if (error instanceof RpcProblem) return rpcError(errorId, error.code, error.message, error.data);
+    return rpcError(errorId, -32603, "Internal error", { detail: String(error) });
   }
 }
 

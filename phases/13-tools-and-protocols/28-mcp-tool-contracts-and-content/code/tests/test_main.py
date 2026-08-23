@@ -49,6 +49,74 @@ class ToolContractTests(unittest.TestCase):
         second_client = main.ContractClient(self.server)
         self.assertEqual(list(tools), list(second_client.discover_tools()))
 
+    def test_explicit_null_cursor_stops_pagination(self) -> None:
+        class ExplicitNullCursorServer(main.ContractServer):
+            def tools_list(self, params):
+                result = super().tools_list(params)
+                if params.get("cursor") == "":
+                    result["nextCursor"] = None
+                return result
+
+        client = main.ContractClient(ExplicitNullCursorServer())
+        tools = client.discover_tools()
+        self.assertEqual(client.cursor_trace, [None, ""])
+        self.assertEqual(
+            sorted(tools),
+            ["evidence_bundle", "route_report", "tag_catalog"],
+        )
+
+    def test_repeated_cursor_is_rejected_before_another_request(self) -> None:
+        class RepeatedCursorServer(main.ContractServer):
+            def __init__(self):
+                super().__init__()
+                self.list_calls = 0
+
+            def tools_list(self, params):
+                main.validate_request_meta(params)
+                self.list_calls += 1
+                return main.complete(tools=[], nextCursor="repeat")
+
+        server = RepeatedCursorServer()
+        client = main.ContractClient(server)
+        with self.assertRaisesRegex(main.ContractViolation, "repeated or cyclic"):
+            client.discover_tools()
+        self.assertEqual(server.list_calls, 2)
+        self.assertEqual(client.cursor_trace, [None, "repeat"])
+
+    def test_cyclic_cursor_chain_is_rejected(self) -> None:
+        class CyclicCursorServer(main.ContractServer):
+            def tools_list(self, params):
+                main.validate_request_meta(params)
+                next_cursor = {None: "a", "a": "b", "b": "a"}.get(
+                    params.get("cursor")
+                )
+                return main.complete(tools=[], nextCursor=next_cursor)
+
+        client = main.ContractClient(CyclicCursorServer())
+        with self.assertRaisesRegex(main.ContractViolation, "repeated or cyclic"):
+            client.discover_tools()
+        self.assertEqual(client.cursor_trace, [None, "a", "b"])
+
+    def test_unique_cursor_stream_is_bounded_by_page_limit(self) -> None:
+        class EndlessCursorServer(main.ContractServer):
+            def __init__(self):
+                super().__init__()
+                self.list_calls = 0
+
+            def tools_list(self, params):
+                main.validate_request_meta(params)
+                self.list_calls += 1
+                return main.complete(
+                    tools=[],
+                    nextCursor=f"cursor-{self.list_calls}",
+                )
+
+        server = EndlessCursorServer()
+        client = main.ContractClient(server, max_list_pages=3)
+        with self.assertRaisesRegex(main.ContractViolation, "page limit of 3"):
+            client.discover_tools()
+        self.assertEqual(server.list_calls, 3)
+
     def test_sensitive_header_descriptor_is_rejected(self) -> None:
         tools = self.client.discover_tools()
         self.assertNotIn("blocked_secret_route", tools)
@@ -254,6 +322,26 @@ class ToolContractTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertEqual(response["error"]["code"], -32020)
+
+    def test_duplicated_recognized_header_is_rejected(self) -> None:
+        tools = self.client.discover_tools()
+        with self.assertRaisesRegex(main.ContractViolation, "duplicated"):
+            main.validate_parameter_headers(
+                tools["route_report"],
+                {"region": "eu-west", "report": "quarterly"},
+                {"Mcp-Param-Region": "eu-west", "mcp-param-region": "eu-west"},
+                [],
+            )
+
+    def test_recognized_header_without_body_argument_is_rejected(self) -> None:
+        tools = self.client.discover_tools()
+        with self.assertRaisesRegex(main.ContractViolation, "no body argument"):
+            main.validate_parameter_headers(
+                tools["route_report"],
+                {"report": "quarterly"},
+                {"Mcp-Param-Region": "eu-west"},
+                [],
+            )
 
     def test_encoded_values_remain_redacted_from_client_and_server_audits(self) -> None:
         tools = self.client.discover_tools()

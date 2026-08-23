@@ -154,6 +154,8 @@ def complete(
 def validate_request(message: dict[str, Any]) -> None:
     if message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str):
         raise RpcProblem(-32600, "Invalid Request")
+    if "id" in message and type(message["id"]) not in (int, str):
+        raise RpcProblem(-32600, "id must be a string or integer")
     params = message.get("params")
     if not isinstance(params, dict):
         raise RpcProblem(-32602, "params must be an object")
@@ -340,6 +342,7 @@ def dispatch(message: dict[str, Any]) -> dict[str, Any] | None:
     if "id" not in message:
         return None
     request_id = message.get("id")
+    error_id = request_id if type(request_id) in (int, str) else None
     try:
         validate_request(message)
         handler = HANDLERS.get(message["method"])
@@ -348,9 +351,9 @@ def dispatch(message: dict[str, Any]) -> dict[str, Any] | None:
         result = handler(message["params"])
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
     except RpcProblem as exc:
-        return rpc_error(request_id, exc.code, str(exc), exc.data)
+        return rpc_error(error_id, exc.code, str(exc), exc.data)
     except Exception as exc:
-        return rpc_error(request_id, -32603, "Internal error", {"detail": str(exc)})
+        return rpc_error(error_id, -32603, "Internal error", {"detail": str(exc)})
 
 
 def serve_stdio() -> None:

@@ -117,6 +117,15 @@ def review(policy: dict[str, object], request: dict[str, object], policy_dir: Pa
     allowed_kinds = policy.get("allowedKinds", [])
     if not isinstance(allowed_kinds, list) or kind not in allowed_kinds:
         return result
+    approval_kinds = policy.get("approvalKinds", [])
+    if not isinstance(approval_kinds, list) or not all(
+        isinstance(value, str) for value in approval_kinds
+    ):
+        result.update(
+            rule="policy-shape",
+            reason="approvalKinds must be an array of strings",
+        )
+        return result
     if kind in {"read", "write", "delete"}:
         target = request.get("target")
         if not isinstance(target, str):
@@ -199,14 +208,13 @@ def review(policy: dict[str, object], request: dict[str, object], policy_dir: Pa
                 reason="possible secret material requires an explicit approved path",
             )
             return result
-    approval_kinds = policy.get("approvalKinds", [])
     untrusted_stateful = influenced_by_untrusted and kind in {
         "write",
         "delete",
         "command",
         "network",
     }
-    policy_gated = isinstance(approval_kinds, list) and kind in approval_kinds
+    policy_gated = kind in approval_kinds
     if (untrusted_stateful or policy_gated) and not approved:
         reason = (
             "untrusted external content influenced a stateful request"

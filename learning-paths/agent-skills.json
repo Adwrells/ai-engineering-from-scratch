@@ -37,6 +37,13 @@
       "title": "Tool Schema Design",
       "path": "phases/13-tools-and-protocols/05-tool-schema-design",
       "description": "Skim this first if you have not designed typed tool contracts."
+    },
+    {
+      "id": "tool-poisoning-and-untrusted-instructions",
+      "type": "knowledge",
+      "required": true,
+      "title": "Tool poisoning and untrusted instructions",
+      "description": "Before Lesson 26, explain why skill and tool metadata is untrusted input. Lesson 15 is an optional refresher outside this five-lesson route when this preflight is not yet confirmed."
     }
   ],
   "invocation": {
@@ -98,8 +105,10 @@
       "minutes": 120,
       "required": true,
       "prerequisitePaths": [
-        "phases/13-tools-and-protocols/15-mcp-security-tool-poisoning",
         "phases/13-tools-and-protocols/25-skill-invocation-and-routing"
+      ],
+      "prerequisiteChecks": [
+        "tool-poisoning-and-untrusted-instructions"
       ],
       "checkpoint": "Distinguish instructions, permission prompts, sandbox containment, and independent verification with observed evidence."
     },

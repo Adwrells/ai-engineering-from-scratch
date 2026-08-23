@@ -26,6 +26,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
@@ -92,6 +93,41 @@ TOOL_SCOPES = {
     "tasks.list": "mcp:tools.invoke",
 }
 DEFAULT_TOOL_SCOPE = "mcp:tools.invoke"
+AUTHORIZATION_CODE_TTL_SECONDS = 300
+
+
+def parsed_absolute_redirect_uri(value: object):
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or any(character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+    ):
+        return None
+    try:
+        parsed = urlparse(value)
+        hostname = parsed.hostname
+    except ValueError:
+        return None
+    if not parsed.scheme or parsed.fragment or parsed.username is not None or parsed.password is not None:
+        return None
+    if parsed.scheme in {"http", "https"} and (not parsed.netloc or hostname is None):
+        return None
+    return parsed
+
+
+def valid_web_redirect_uri(value: object) -> bool:
+    parsed = parsed_absolute_redirect_uri(value)
+    return parsed is not None and parsed.scheme == "https" and parsed.hostname is not None
+
+
+def valid_native_redirect_uri(value: object) -> bool:
+    parsed = parsed_absolute_redirect_uri(value)
+    if parsed is None:
+        return False
+    if parsed.scheme == "http":
+        return parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +148,11 @@ class AuthorizationServer:
     keys: list[IdPKey] = field(default_factory=list)
     clients: dict[str, dict] = field(default_factory=dict)
     authorization_codes: dict[str, dict] = field(default_factory=dict)
+    _authorization_codes_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        repr=False,
+        compare=False,
+    )
 
     def current_key(self) -> IdPKey:
         return self.keys[-1]
@@ -171,9 +212,24 @@ class AuthorizationServer:
         if (
             not isinstance(redirect_uris, list)
             or not redirect_uris
-            or any(not isinstance(uri, str) or not uri.strip() for uri in redirect_uris)
+            or any(parsed_absolute_redirect_uri(uri) is None for uri in redirect_uris)
         ):
-            raise ValueError("CIMD requires at least one redirect URI")
+            raise ValueError(
+                "CIMD requires absolute redirect URIs without fragments"
+            )
+        if application_type == "web" and any(
+            not valid_web_redirect_uri(uri) for uri in redirect_uris
+        ):
+            raise ValueError(
+                "CIMD web clients require absolute HTTPS redirect URIs "
+                "with a host and no fragment"
+            )
+        if application_type == "native" and any(
+            not valid_native_redirect_uri(uri) for uri in redirect_uris
+        ):
+            raise ValueError(
+                "CIMD native clients require HTTPS, a loopback HTTP URI, or a custom scheme"
+            )
         self.clients[document_url] = {
             "redirect_uris": redirect_uris,
             "grant_types": document.get("grant_types", ["authorization_code"]),
@@ -187,13 +243,21 @@ class AuthorizationServer:
     def register_client(self, body: dict) -> dict:
         """Deprecated RFC 7591 registration retained for compatibility."""
         redirect_uris = body.get("redirect_uris", [])
-        if not redirect_uris:
+        if (
+            not isinstance(redirect_uris, list)
+            or not redirect_uris
+            or any(parsed_absolute_redirect_uri(uri) is None for uri in redirect_uris)
+        ):
             return {"status": 400, "body": {"error": "invalid_redirect_uri"}}
         application_type = body.get("application_type")
         if application_type not in {"native", "web"}:
             return {"status": 400, "body": {"error": "invalid_client_metadata"}}
         if application_type == "web" and any(
-            urlparse(uri).scheme != "https" for uri in redirect_uris
+            not valid_web_redirect_uri(uri) for uri in redirect_uris
+        ):
+            return {"status": 400, "body": {"error": "invalid_redirect_uri"}}
+        if application_type == "native" and any(
+            not valid_native_redirect_uri(uri) for uri in redirect_uris
         ):
             return {"status": 400, "body": {"error": "invalid_redirect_uri"}}
         if body.get("token_endpoint_auth_method", "none") not in {"none", "private_key_jwt"}:
@@ -248,6 +312,7 @@ class AuthorizationServer:
         client_id: str,
         redirect_uri: str,
         code_challenge: str,
+        code_challenge_method: str,
         scopes: set[str],
         resource: str,
         user: str,
@@ -259,18 +324,33 @@ class AuthorizationServer:
             raise ValueError("authorization redirect_uri is not registered")
         if not isinstance(code_challenge, str) or not code_challenge:
             raise ValueError("authorization request requires an S256 code_challenge")
+        if code_challenge_method != "S256":
+            raise ValueError("authorization request requires code_challenge_method S256")
         parsed_resource = urlparse(resource)
         if parsed_resource.scheme != "https" or not parsed_resource.netloc:
             raise ValueError("resource must be an absolute HTTPS URL")
-        code = secrets.token_urlsafe(24)
-        self.authorization_codes[code] = {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "code_challenge": code_challenge,
-            "scopes": set(scopes),
-            "resource": resource,
-            "user": user,
-        }
+        with self._authorization_codes_lock:
+            now = time.time()
+            expired_codes = [
+                code
+                for code, record in self.authorization_codes.items()
+                if record["expires_at"] <= now
+            ]
+            for expired_code in expired_codes:
+                self.authorization_codes.pop(expired_code, None)
+            code = secrets.token_urlsafe(24)
+            while code in self.authorization_codes:
+                code = secrets.token_urlsafe(24)
+            self.authorization_codes[code] = {
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "code_challenge": code_challenge,
+                "code_challenge_method": code_challenge_method,
+                "scopes": set(scopes),
+                "resource": resource,
+                "user": user,
+                "expires_at": now + AUTHORIZATION_CODE_TTL_SECONDS,
+            }
         return {"code": code, "iss": self.issuer}
 
     def redeem_code(
@@ -282,17 +362,21 @@ class AuthorizationServer:
         code_verifier: str,
         resource: str,
     ) -> str:
-        record = self.authorization_codes.get(code)
-        if record is None:
-            raise ValueError("authorization code is invalid or already used")
-        if record["client_id"] != client_id or record["redirect_uri"] != redirect_uri:
-            raise ValueError("authorization code is not bound to this client redirect")
-        if record["resource"] != resource:
-            raise ValueError("token resource does not match the authorization request")
-        supplied_challenge = b64url(hashlib.sha256(code_verifier.encode()).digest())
-        if not hmac.compare_digest(record["code_challenge"], supplied_challenge):
-            raise ValueError("PKCE code_verifier does not match the stored challenge")
-        self.authorization_codes.pop(code)
+        with self._authorization_codes_lock:
+            record = self.authorization_codes.get(code)
+            if record is None:
+                raise ValueError("authorization code is invalid or already used")
+            if record["expires_at"] <= time.time():
+                self.authorization_codes.pop(code, None)
+                raise ValueError("authorization code is expired")
+            if record["client_id"] != client_id or record["redirect_uri"] != redirect_uri:
+                raise ValueError("authorization code is not bound to this client redirect")
+            if record["resource"] != resource:
+                raise ValueError("token resource does not match the authorization request")
+            supplied_challenge = b64url(hashlib.sha256(code_verifier.encode()).digest())
+            if not hmac.compare_digest(record["code_challenge"], supplied_challenge):
+                raise ValueError("PKCE code_verifier does not match the stored challenge")
+            self.authorization_codes.pop(code)
         return self.issue_token(
             client_id,
             record["user"],
@@ -505,6 +589,7 @@ class Client:
             client_id=client_id,
             redirect_uri=redirect_uri,
             code_challenge=challenge,
+            code_challenge_method="S256",
             scopes=scopes,
             resource=resource,
             user=user,

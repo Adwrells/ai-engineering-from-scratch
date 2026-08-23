@@ -332,6 +332,70 @@ function parseLearningPaths(repoRoot = REPO_ROOT, phases = []) {
     if (ids.has(id)) throw new Error(`Duplicate learning path id: ${id}`);
     ids.add(id);
 
+    const prerequisiteIds = new Set();
+    const prerequisites = (Array.isArray(manifest.prerequisites) ? manifest.prerequisites : [])
+      .map((entry, index) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          throw new Error(`Learning path ${id} prerequisite ${index + 1} must be an object`);
+        }
+        const normalized = { ...entry };
+        if (!Object.prototype.hasOwnProperty.call(normalized, 'id')) return normalized;
+        const checkId = String(normalized.id || '').trim();
+        if (!checkId) {
+          throw new Error(`Learning path ${id} prerequisite ${index + 1} has an empty id`);
+        }
+        if (prerequisiteIds.has(checkId)) {
+          throw new Error(`Learning path ${id} repeats prerequisite id: ${checkId}`);
+        }
+        prerequisiteIds.add(checkId);
+        normalized.id = checkId;
+        return normalized;
+      });
+
+    function normalizePrerequisiteChecks(value, lessonPath) {
+      if (value === undefined) return [];
+      if (!Array.isArray(value)) {
+        throw new Error(`Learning path ${id} lesson ${lessonPath} prerequisiteChecks must be an array`);
+      }
+      const seen = new Set();
+      return value.map(rawId => {
+        if (typeof rawId !== 'string' || !rawId.trim()) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} has an invalid prerequisite check id`);
+        }
+        const checkId = rawId.trim();
+        if (seen.has(checkId)) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} repeats prerequisite check: ${checkId}`);
+        }
+        if (!prerequisiteIds.has(checkId)) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} references an unknown prerequisite check: ${checkId}`);
+        }
+        seen.add(checkId);
+        return checkId;
+      });
+    }
+
+    function normalizePrerequisitePaths(value, lessonPath) {
+      if (value === undefined) return [];
+      if (!Array.isArray(value)) {
+        throw new Error(`Learning path ${id} lesson ${lessonPath} prerequisitePaths must be an array`);
+      }
+      const seen = new Set();
+      return value.map(rawPath => {
+        if (typeof rawPath !== 'string') {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} has an invalid prerequisite path`);
+        }
+        const prerequisitePath = rawPath.replace(/^\/+|\/+$/g, '');
+        if (!prerequisitePath) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} has an invalid prerequisite path`);
+        }
+        if (seen.has(prerequisitePath)) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} repeats prerequisite path: ${prerequisitePath}`);
+        }
+        seen.add(prerequisitePath);
+        return prerequisitePath;
+      });
+    }
+
     function normalizeEntry(entry, index, required) {
       const source = typeof entry === 'string' ? { path: entry } : { ...(entry || {}) };
       const canonicalPath = String(source.path || '').replace(/^\/+|\/+$/g, '');
@@ -352,6 +416,10 @@ function parseLearningPaths(repoRoot = REPO_ROOT, phases = []) {
         type: lesson.type,
         lang: lesson.lang,
         required: required ? source.required !== false : false,
+        prerequisiteChecks: normalizePrerequisiteChecks(source.prerequisiteChecks, canonicalPath),
+        ...(source.prerequisitePaths !== undefined && {
+          prerequisitePaths: normalizePrerequisitePaths(source.prerequisitePaths, canonicalPath),
+        }),
       };
     }
 
@@ -359,8 +427,13 @@ function parseLearningPaths(repoRoot = REPO_ROOT, phases = []) {
     const optionalEntries = Array.isArray(manifest.optionalLessons) ? manifest.optionalLessons : [];
     if (!requiredEntries.length) throw new Error(`Learning path ${id} needs at least one lesson`);
 
-    const lessons = requiredEntries.map((entry, index) => normalizeEntry(entry, index, true));
-    const optionalLessons = optionalEntries.map((entry, index) => normalizeEntry(entry, index, false));
+    const byOrder = (a, b) => a.order - b.order;
+    const lessons = requiredEntries
+      .map((entry, index) => normalizeEntry(entry, index, true))
+      .sort(byOrder);
+    const optionalLessons = optionalEntries
+      .map((entry, index) => normalizeEntry(entry, index, false))
+      .sort(byOrder);
     const seenPaths = new Set();
     for (const entry of lessons.concat(optionalLessons)) {
       if (seenPaths.has(entry.path)) {
@@ -369,12 +442,67 @@ function parseLearningPaths(repoRoot = REPO_ROOT, phases = []) {
       seenPaths.add(entry.path);
     }
 
+    const routeEntries = lessons.concat(optionalLessons);
+    const routeIndex = new Map(routeEntries.map((entry, index) => [entry.path, index]));
+    const prerequisiteGraph = new Map();
+    for (const entry of routeEntries) {
+      const prerequisitePaths = Array.isArray(entry.prerequisitePaths)
+        ? entry.prerequisitePaths
+        : [];
+      for (const prerequisitePath of prerequisitePaths) {
+        if (!lessonsByPath.has(prerequisitePath)) {
+          throw new Error(
+            `Learning path ${id} lesson ${entry.path} references an unknown prerequisite path: ${prerequisitePath}`
+          );
+        }
+        if (prerequisitePath === entry.path) {
+          throw new Error(`Learning path ${id} lesson ${entry.path} cannot depend on itself`);
+        }
+      }
+      prerequisiteGraph.set(
+        entry.path,
+        prerequisitePaths.filter(prerequisitePath => routeIndex.has(prerequisitePath))
+      );
+    }
+
+    const visiting = [];
+    const visitingSet = new Set();
+    const visited = new Set();
+    function visitPrerequisites(lessonPath) {
+      if (visitingSet.has(lessonPath)) {
+        const cycleStart = visiting.indexOf(lessonPath);
+        const cycle = visiting.slice(cycleStart).concat(lessonPath);
+        throw new Error(`Learning path ${id} contains a prerequisite cycle: ${cycle.join(' -> ')}`);
+      }
+      if (visited.has(lessonPath)) return;
+      visiting.push(lessonPath);
+      visitingSet.add(lessonPath);
+      for (const prerequisitePath of prerequisiteGraph.get(lessonPath) || []) {
+        visitPrerequisites(prerequisitePath);
+      }
+      visiting.pop();
+      visitingSet.delete(lessonPath);
+      visited.add(lessonPath);
+    }
+    for (const entry of routeEntries) visitPrerequisites(entry.path);
+
+    for (const entry of routeEntries) {
+      for (const prerequisitePath of prerequisiteGraph.get(entry.path) || []) {
+        if (routeIndex.get(prerequisitePath) >= routeIndex.get(entry.path)) {
+          throw new Error(
+            `Learning path ${id} lesson ${entry.path} has a forward prerequisite: ${prerequisitePath}`
+          );
+        }
+      }
+    }
+
     return {
       ...manifest,
       id,
       title: String(manifest.title || id).trim(),
       summary: String(manifest.summary || '').trim(),
       estimatedMinutes: Number(manifest.estimatedMinutes || 0),
+      prerequisites,
       lessons,
       optionalLessons,
     };
@@ -1201,19 +1329,27 @@ function parseFrontmatter(text) {
   return result;
 }
 
+function assertRepositoryContainment(targetDir, repoRoot, label) {
+  const resolvedRepoRoot = fs.realpathSync(repoRoot);
+  const resolvedTarget = fs.realpathSync(targetDir);
+  const rootPrefix = resolvedRepoRoot.endsWith(path.sep)
+    ? resolvedRepoRoot
+    : resolvedRepoRoot + path.sep;
+  if (resolvedTarget !== resolvedRepoRoot && !resolvedTarget.startsWith(rootPrefix)) {
+    throw new Error(`${label} escapes the repository: ${targetDir}`);
+  }
+  const targetStat = fs.lstatSync(targetDir);
+  if (targetStat.isSymbolicLink() || !targetStat.isDirectory()) {
+    throw new Error(`${label} must be a regular directory: ${targetDir}`);
+  }
+}
+
 function listSkillBundleFiles(bundleDir, repoRoot) {
   const rootStat = fs.lstatSync(bundleDir);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
     throw new Error(`Skill bundle must be a regular directory: ${bundleDir}`);
   }
-  const resolvedRepoRoot = fs.realpathSync(repoRoot);
-  const resolvedBundle = fs.realpathSync(bundleDir);
-  const rootPrefix = resolvedRepoRoot.endsWith(path.sep)
-    ? resolvedRepoRoot
-    : resolvedRepoRoot + path.sep;
-  if (resolvedBundle !== resolvedRepoRoot && !resolvedBundle.startsWith(rootPrefix)) {
-    throw new Error(`Skill bundle escapes the repository: ${bundleDir}`);
-  }
+  assertRepositoryContainment(bundleDir, repoRoot, 'Skill bundle');
   const files = [];
   function visit(currentDir, relativeDir) {
     const entries = fs.readdirSync(currentDir, { withFileTypes: true })
@@ -1254,6 +1390,7 @@ function discoverArtifacts(repoRoot = REPO_ROOT) {
       const lessonRel = `phases/${phaseDirName}/${lessonDirName}`;
       const outputsDir = path.join(phaseDir, lessonDirName, 'outputs');
       if (fs.existsSync(outputsDir)) {
+        assertRepositoryContainment(outputsDir, repoRoot, 'Lesson outputs');
         const entries = fs.readdirSync(outputsDir, { withFileTypes: true })
           .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
         for (const entry of entries) {

@@ -65,7 +65,9 @@ discovery, invocation, human or model invocability, permission boundaries,
 sandboxes, skill evals, packaging, or portability, route to
 `learn-agent-skills`. Its source of truth is
 `learning-paths/agent-skills.json`. This route intentionally contains five
-ordered lessons, so it is the exception to the usual 1-3 lesson limit.
+ordered lessons, so it is the exception to the usual 1-3 lesson limit. Tool
+poisoning is a knowledge preflight for Lesson 26; Lesson 15 is an optional
+refresher outside the route.
 
 ## How to route
 

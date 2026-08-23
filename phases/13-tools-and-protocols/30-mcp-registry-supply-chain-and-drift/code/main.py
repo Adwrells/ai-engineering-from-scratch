@@ -12,7 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 
 PROTOCOL_VERSION = "2026-07-28"
@@ -54,6 +54,52 @@ def is_sha256_digest(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(
         character in "0123456789abcdefABCDEF" for character in value
     )
+
+
+def normalize_https_remote_url(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    decoded = unquote(value)
+    if any(
+        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+        for character in value + decoded
+    ):
+        return None
+    try:
+        parsed = urlparse(value)
+        hostname = parsed.hostname
+        username = parsed.username
+        password = parsed.password
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "https"
+        or not isinstance(hostname, str)
+        or not hostname
+        or username is not None
+        or password is not None
+        or parsed.fragment
+    ):
+        return None
+    normalized_host = hostname.lower()
+    if ":" in normalized_host:
+        normalized_host = f"[{normalized_host}]"
+    else:
+        try:
+            normalized_host = normalized_host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return None
+    netloc = normalized_host
+    if port is not None and port != 443:
+        netloc = f"{netloc}:{port}"
+    return urlunparse(
+        ("https", netloc, parsed.path or "/", parsed.params, parsed.query, "")
+    )
+
+
+def is_valid_https_remote_url(value: Any) -> bool:
+    return normalize_https_remote_url(value) is not None
 
 
 def reported_server_info(live: Any) -> dict[str, Any] | None:
@@ -172,9 +218,8 @@ class RegistryAdmissionController:
                         f"record.remotes[{index}].type must be streamable-http or sse"
                     )
                 url = remote.get("url")
-                parsed = urlparse(url) if isinstance(url, str) else None
-                if parsed is None or parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                    errors.append(f"record.remotes[{index}].url must be an HTTP URL")
+                if not is_valid_https_remote_url(url):
+                    errors.append(f"record.remotes[{index}].url must be an HTTPS URL")
 
         metadata = record.get("_meta", {})
         if not isinstance(metadata, dict):
@@ -194,8 +239,14 @@ class RegistryAdmissionController:
         if kind == "remote":
             remotes = record.get("remotes", [])
             candidates = [item for item in remotes if isinstance(item, dict)] if isinstance(remotes, list) else []
+            evidence_url = normalize_https_remote_url(provenance_evidence.get("url"))
             remote = next(
-                (item for item in candidates if item.get("url") == provenance_evidence.get("url")),
+                (
+                    item
+                    for item in candidates
+                    if evidence_url is not None
+                    and normalize_https_remote_url(item.get("url")) == evidence_url
+                ),
                 None,
             )
             errors: list[str] = []
@@ -208,7 +259,9 @@ class RegistryAdmissionController:
                 errors.append("remote ownership or provenance is not verified")
             if not is_sha256_digest(provenance_evidence.get("digest")):
                 errors.append("remote evidence digest is not a SHA-256 digest")
-            return errors, deepcopy({"kind": "remote", **remote})
+            source = deepcopy({"kind": "remote", **remote})
+            source["url"] = evidence_url
+            return errors, source
         if kind != "package":
             return [f"unknown provenance evidence kind: {kind}"], None
 

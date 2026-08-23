@@ -97,7 +97,13 @@ def decode_rpc_response(
     response: dict[str, Any],
     expected_id: int | str,
 ) -> tuple[str, dict[str, Any]]:
-    if response.get("jsonrpc") != "2.0" or response.get("id") != expected_id:
+    response_id = response.get("id")
+    if (
+        response.get("jsonrpc") != "2.0"
+        or type(response_id) not in (int, str)
+        or type(response_id) is not type(expected_id)
+        or response_id != expected_id
+    ):
         raise RuntimeError("invalid JSON-RPC response envelope")
     has_result = "result" in response
     has_error = "error" in response
@@ -478,11 +484,12 @@ class MultiServerClient:
         else:
             raise RuntimeError(f"{peer.name}: protocol era not selected")
         response = self._send(peer, message)
-        if response is None or response.get("id") != request_id:
-            raise RuntimeError(f"{peer.name}: missing or mismatched response")
-        if "error" in response:
-            raise RuntimeError(f"{peer.name}: RPC error {response['error']}")
-        result = dict(response["result"])
+        if not isinstance(response, dict):
+            raise RuntimeError(f"{peer.name}: missing response")
+        kind, payload = decode_rpc_response(response, request_id)
+        if kind != "result":
+            raise RuntimeError(f"{peer.name}: RPC error {payload}")
+        result = dict(payload)
         if peer.era == "modern" and "resultType" not in result:
             raise RuntimeError(f"{peer.name}: modern result omitted resultType")
         if peer.era == "legacy":

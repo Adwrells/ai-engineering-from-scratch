@@ -13,6 +13,7 @@ from main import (
     SERVER_INFO_KEY,
     SUPPORTED_VERSIONS,
     MCPClient,
+    MCPServer,
     request_metadata,
     server,
 )
@@ -124,6 +125,84 @@ class StatelessMCPTests(unittest.TestCase):
             }
         )
         self.assertIsNone(response)
+
+    def test_idless_invalid_envelopes_receive_no_response(self):
+        for message in (
+            {"jsonrpc": "1.0", "method": "tools/list"},
+            {"jsonrpc": "2.0", "params": {}},
+        ):
+            with self.subTest(message=message):
+                self.assertIsNone(server.handle(message))
+
+    def test_handler_key_and_type_errors_are_internal_errors(self):
+        local = MCPServer("handler-errors")
+
+        @local.tool("broken", "Raise a key error.", {"type": "object"})
+        def broken():
+            return {}["missing"]
+
+        metadata = {"_meta": request_metadata()}
+        key_error = local.handle(
+            envelope("tools/call", {**metadata, "name": "broken"})
+        )
+        type_error = server.handle(
+            envelope(
+                "tools/call",
+                {**metadata, "name": "add", "arguments": {"a": 1}},
+            )
+        )
+        self.assertEqual(-32603, key_error["error"]["code"])
+        self.assertEqual(-32603, type_error["error"]["code"])
+
+    def test_non_serializable_tool_result_is_an_internal_error(self):
+        local = MCPServer("serialization-errors")
+
+        @local.tool("broken", "Return a non-JSON value.", {"type": "object"})
+        def broken():
+            return {"values": {1}}
+
+        response = local.handle(
+            envelope(
+                "tools/call",
+                {
+                    "_meta": request_metadata(),
+                    "name": "broken",
+                    "arguments": {},
+                },
+            )
+        )
+        self.assertEqual(-32603, response["error"]["code"])
+        self.assertEqual("tool handler failed", response["error"]["message"])
+
+    def test_non_text_resource_and_prompt_results_are_internal_errors(self):
+        local = MCPServer("serialization-errors")
+
+        @local.resource("broken://resource", "broken", "Return a non-JSON value.")
+        def broken_resource():
+            return {"not-json"}
+
+        @local.prompt("broken", "Return a non-JSON value.", [])
+        def broken_prompt():
+            return {"not-json"}
+
+        metadata = {"_meta": request_metadata()}
+        resource_response = local.handle(
+            envelope(
+                "resources/read",
+                {**metadata, "uri": "broken://resource"},
+            )
+        )
+        prompt_response = local.handle(
+            envelope(
+                "prompts/get",
+                {**metadata, "name": "broken", "arguments": {}},
+            )
+        )
+
+        self.assertEqual(-32603, resource_response["error"]["code"])
+        self.assertEqual("resource handler failed", resource_response["error"]["message"])
+        self.assertEqual(-32603, prompt_response["error"]["code"])
+        self.assertEqual("prompt handler failed", prompt_response["error"]["message"])
 
     def test_null_request_id_is_invalid(self):
         response = server.handle(

@@ -216,7 +216,9 @@ The lesson signs a state payload containing:
 
 Before mutation, the server also checks the live note record. This catches deletion races and a target moved outside the workspace after the form was shown.
 
-For a one-time financial or irreversible action, HMAC alone does not prevent a valid state from being replayed within its expiry. Store and consume a nonce exactly once.
+For a one-time financial or irreversible action, HMAC alone does not prevent a valid state from being replayed within its expiry. Store and consume a nonce exactly once in a replay store shared by every handler instance. The lesson injects a bounded, TTL-pruned store and holds its atomic claim while performing the in-memory deletion. A production database should couple the nonce claim and mutation in one transaction or equivalent conditional-write boundary.
+
+Validate the interaction before claiming the nonce. A malformed response or `cancel` performs no mutation and leaves the state retryable until expiry. An explicit `decline` is terminal, so the lesson consumes the nonce without deleting anything.
 
 ```figure
 t3-roots-boundary
@@ -233,6 +235,7 @@ t3-roots-boundary
 - Every destructive deletion requires form-mode elicitation.
 - The elicitation travels inside `resultType: "input_required"`.
 - Signed `requestState` binds the exact candidate list and original arguments.
+- An injected replay store rejects the same accepted or declined state across server instances.
 - The retry uses a fresh request id and returns `resultType: "complete"`.
 
 The data store is in memory so the protocol behavior is easy to inspect. The security rules remain the same with a database.
@@ -256,6 +259,7 @@ Expected checkpoints:
 - A prefix path and an encoded traversal path both fail containment.
 - A changed title cannot reuse the original confirmation state.
 - A decline leaves the note unchanged.
+- Two server objects sharing note and replay state cannot both execute one confirmation.
 - Empty and explicit form declarations work, while URL-only support returns exact `-32021` form requirements.
 - Unsupported version failures use the exact `-32022` data shape.
 - An id-less notification produces no JSON-RPC response.
@@ -266,7 +270,7 @@ Expected checkpoints:
 
 ## Exercises
 
-1. Add a one-time nonce store and prove the same accepted confirmation cannot delete twice.
+1. Replace the in-memory replay store with SQLite. Use one transaction to claim the nonce and delete the note, then prove two processes cannot both commit.
 2. Add `url` capability negotiation and an out-of-band setup flow. Keep third-party credentials out of `inputResponses`.
 3. Replace the in-memory note map with a temporary SQLite database. Re-check authorization and containment inside the mutation transaction.
 4. Add a symbolic-link policy for a real filesystem implementation. Explain why URI lexical containment alone cannot stop a symlink escape.

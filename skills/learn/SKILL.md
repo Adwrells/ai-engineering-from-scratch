@@ -31,6 +31,46 @@ https://raw.githubusercontent.com/rohitg00/ai-engineering-from-scratch/main/<pat
 - Lesson list for a phase: the Contents section of `README.md` (each phase's
   table lists every lesson with its directory path and title)
 
+## Resume routing across course modes
+
+Before Step 0, resolve every "resume" or "continue" request against these
+four supported state files and their installed route owners:
+
+- `LEARNING.md` belongs to `learn` for the full curriculum.
+- `MCP-ENGINEERING-LEARNING.md` belongs to `learn-mcp-engineering`.
+- `AGENT-SKILLS-LEARNING.md` belongs to `learn-agent-skills`.
+- `CLAUDE-CERTIFICATION.md` belongs to `claude-certification`.
+
+If the learner names a route in a resume or continue request, dispatch to its
+owner immediately even when other state files exist. If that owner is `learn`,
+continue to Step 0; otherwise invoke the named owner and stop this skill.
+
+For an unnamed resume or continue request, collect the owners whose state files
+exist. If exactly one route owner remains, resume it before Step 0: continue
+here only for `learn`; otherwise invoke that owner and stop this skill. If two
+or more route owners remain, list the available routes and ask which route to
+resume before selecting a lesson or changing any state. If none exist, continue
+to Step 0. Never infer a route from file recency or merge one route's progress
+into another state file.
+
+## Focused MCP handoff
+
+If the learner asks for the MCP route, or `MCP-ENGINEERING-LEARNING.md` exists
+and they ask to resume MCP, hand off to the portable skill
+`learn-mcp-engineering`. Its source of truth is
+`learning-paths/mcp-engineering.json`. Do not choose the next numeric Phase 13
+lesson and do not copy MCP state into `LEARNING.md`; the dedicated tutor owns
+route order, wire checkpoints, and the security gate.
+
+## Focused Agent Skills handoff
+
+If the learner asks for the Agent Skills route, or
+`AGENT-SKILLS-LEARNING.md` exists and they ask to resume Agent Skills, hand off
+to the portable skill `learn-agent-skills`. Its source of truth is
+`learning-paths/agent-skills.json`. Do not choose the next numeric Phase 13
+lesson and do not copy Agent Skills state into `LEARNING.md`; the dedicated
+tutor owns route order, host evidence, and the poisoning knowledge preflight.
+
 ## Step 0 — Locate state
 
 Read `LEARNING.md` from the current directory.

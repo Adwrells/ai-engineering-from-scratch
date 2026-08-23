@@ -233,6 +233,218 @@ function parseReadme(content, roadmapStatuses) {
   return phases;
 }
 
+// ─── Parse focused learning paths ────────────────────────────────────
+// A learning path is an ordered overlay on the canonical PHASES data. The
+// manifest owns intent and pacing; README owns the lesson title and URL.
+function parseLearningPaths(repoRoot = REPO_ROOT, phases = []) {
+  const learningPathsDir = path.join(repoRoot, 'learning-paths');
+  if (!fs.existsSync(learningPathsDir)) return [];
+
+  const lessonsByPath = new Map();
+  for (const phase of phases) {
+    for (const lesson of phase.lessons || []) {
+      const canonicalPath = lessonPath(lesson.url);
+      if (!canonicalPath) continue;
+      lessonsByPath.set(canonicalPath, {
+        title: lesson.name,
+        phaseId: phase.id,
+        phaseName: phase.name,
+        type: lesson.type,
+        lang: lesson.lang,
+      });
+    }
+  }
+
+  const manifests = fs.readdirSync(learningPathsDir)
+    .filter(file => file.endsWith('.json'))
+    .sort();
+  const ids = new Set();
+
+  return manifests.map(file => {
+    const manifestPath = path.join(learningPathsDir, file);
+    const manifest = readJson(manifestPath, `learning path ${file}`);
+    const id = String(manifest.id || path.basename(file, '.json')).trim();
+    if (!id) throw new Error(`Learning path ${file} needs an id`);
+    if (ids.has(id)) throw new Error(`Duplicate learning path id: ${id}`);
+    ids.add(id);
+
+    const prerequisiteIds = new Set();
+    const prerequisites = (Array.isArray(manifest.prerequisites) ? manifest.prerequisites : [])
+      .map((entry, index) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          throw new Error(`Learning path ${id} prerequisite ${index + 1} must be an object`);
+        }
+        const normalized = { ...entry };
+        if (!Object.prototype.hasOwnProperty.call(normalized, 'id')) return normalized;
+        const checkId = String(normalized.id || '').trim();
+        if (!checkId) {
+          throw new Error(`Learning path ${id} prerequisite ${index + 1} has an empty id`);
+        }
+        if (prerequisiteIds.has(checkId)) {
+          throw new Error(`Learning path ${id} repeats prerequisite id: ${checkId}`);
+        }
+        prerequisiteIds.add(checkId);
+        normalized.id = checkId;
+        return normalized;
+      });
+
+    function normalizePrerequisiteChecks(value, lessonPath) {
+      if (value === undefined) return [];
+      if (!Array.isArray(value)) {
+        throw new Error(`Learning path ${id} lesson ${lessonPath} prerequisiteChecks must be an array`);
+      }
+      const seen = new Set();
+      return value.map(rawId => {
+        if (typeof rawId !== 'string' || !rawId.trim()) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} has an invalid prerequisite check id`);
+        }
+        const checkId = rawId.trim();
+        if (seen.has(checkId)) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} repeats prerequisite check: ${checkId}`);
+        }
+        if (!prerequisiteIds.has(checkId)) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} references an unknown prerequisite check: ${checkId}`);
+        }
+        seen.add(checkId);
+        return checkId;
+      });
+    }
+
+    function normalizePrerequisitePaths(value, lessonPath) {
+      if (value === undefined) return [];
+      if (!Array.isArray(value)) {
+        throw new Error(`Learning path ${id} lesson ${lessonPath} prerequisitePaths must be an array`);
+      }
+      const seen = new Set();
+      return value.map(rawPath => {
+        if (typeof rawPath !== 'string') {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} has an invalid prerequisite path`);
+        }
+        const prerequisitePath = rawPath.replace(/^\/+|\/+$/g, '');
+        if (!prerequisitePath) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} has an invalid prerequisite path`);
+        }
+        if (seen.has(prerequisitePath)) {
+          throw new Error(`Learning path ${id} lesson ${lessonPath} repeats prerequisite path: ${prerequisitePath}`);
+        }
+        seen.add(prerequisitePath);
+        return prerequisitePath;
+      });
+    }
+
+    function normalizeEntry(entry, index, required) {
+      const source = typeof entry === 'string' ? { path: entry } : { ...(entry || {}) };
+      const canonicalPath = String(source.path || '').replace(/^\/+|\/+$/g, '');
+      if (!canonicalPath) {
+        throw new Error(`Learning path ${id} has a lesson without a path`);
+      }
+      const lesson = lessonsByPath.get(canonicalPath);
+      if (!lesson) {
+        throw new Error(`Learning path ${id} references an unknown lesson: ${canonicalPath}`);
+      }
+      return {
+        ...source,
+        order: Number.isFinite(Number(source.order)) ? Number(source.order) : index + 1,
+        path: canonicalPath,
+        title: lesson.title,
+        phaseId: lesson.phaseId,
+        phaseName: lesson.phaseName,
+        type: lesson.type,
+        lang: lesson.lang,
+        required: required ? source.required !== false : false,
+        prerequisiteChecks: normalizePrerequisiteChecks(source.prerequisiteChecks, canonicalPath),
+        ...(source.prerequisitePaths !== undefined && {
+          prerequisitePaths: normalizePrerequisitePaths(source.prerequisitePaths, canonicalPath),
+        }),
+      };
+    }
+
+    const requiredEntries = Array.isArray(manifest.lessons) ? manifest.lessons : [];
+    const optionalEntries = Array.isArray(manifest.optionalLessons) ? manifest.optionalLessons : [];
+    if (!requiredEntries.length) throw new Error(`Learning path ${id} needs at least one lesson`);
+
+    const byOrder = (a, b) => a.order - b.order;
+    const lessons = requiredEntries
+      .map((entry, index) => normalizeEntry(entry, index, true))
+      .sort(byOrder);
+    const optionalLessons = optionalEntries
+      .map((entry, index) => normalizeEntry(entry, index, false))
+      .sort(byOrder);
+    const seenPaths = new Set();
+    for (const entry of lessons.concat(optionalLessons)) {
+      if (seenPaths.has(entry.path)) {
+        throw new Error(`Learning path ${id} repeats lesson: ${entry.path}`);
+      }
+      seenPaths.add(entry.path);
+    }
+
+    const routeEntries = lessons.concat(optionalLessons);
+    const routeIndex = new Map(routeEntries.map((entry, index) => [entry.path, index]));
+    const prerequisiteGraph = new Map();
+    for (const entry of routeEntries) {
+      const prerequisitePaths = Array.isArray(entry.prerequisitePaths)
+        ? entry.prerequisitePaths
+        : [];
+      for (const prerequisitePath of prerequisitePaths) {
+        if (!lessonsByPath.has(prerequisitePath)) {
+          throw new Error(
+            `Learning path ${id} lesson ${entry.path} references an unknown prerequisite path: ${prerequisitePath}`
+          );
+        }
+        if (prerequisitePath === entry.path) {
+          throw new Error(`Learning path ${id} lesson ${entry.path} cannot depend on itself`);
+        }
+      }
+      prerequisiteGraph.set(
+        entry.path,
+        prerequisitePaths.filter(prerequisitePath => routeIndex.has(prerequisitePath))
+      );
+    }
+
+    const visiting = [];
+    const visitingSet = new Set();
+    const visited = new Set();
+    function visitPrerequisites(lessonPath) {
+      if (visitingSet.has(lessonPath)) {
+        const cycleStart = visiting.indexOf(lessonPath);
+        const cycle = visiting.slice(cycleStart).concat(lessonPath);
+        throw new Error(`Learning path ${id} contains a prerequisite cycle: ${cycle.join(' -> ')}`);
+      }
+      if (visited.has(lessonPath)) return;
+      visiting.push(lessonPath);
+      visitingSet.add(lessonPath);
+      for (const prerequisitePath of prerequisiteGraph.get(lessonPath) || []) {
+        visitPrerequisites(prerequisitePath);
+      }
+      visiting.pop();
+      visitingSet.delete(lessonPath);
+      visited.add(lessonPath);
+    }
+    for (const entry of routeEntries) visitPrerequisites(entry.path);
+
+    for (const entry of routeEntries) {
+      for (const prerequisitePath of prerequisiteGraph.get(entry.path) || []) {
+        if (routeIndex.get(prerequisitePath) >= routeIndex.get(entry.path)) {
+          throw new Error(
+            `Learning path ${id} lesson ${entry.path} has a forward prerequisite: ${prerequisitePath}`
+          );
+        }
+      }
+    }
+
+    return {
+      ...manifest,
+      id,
+      title: String(manifest.title || id).trim(),
+      summary: String(manifest.summary || '').trim(),
+      estimatedMinutes: Number(manifest.estimatedMinutes || 0),
+      prerequisites,
+      lessons,
+      optionalLessons,
+    };
+  });
+}
+
 // ─── Parse the canonical phase dependency graph from README.md ───────
 // The public Mermaid diagram under "The shape of the curriculum" owns the
 // phase-level learning path. Keeping the website graph generated from it
@@ -936,9 +1148,53 @@ function parseFrontmatter(text) {
   return result;
 }
 
-function discoverArtifacts() {
+function assertRepositoryContainment(targetDir, repoRoot, label) {
+  const resolvedRepoRoot = fs.realpathSync(repoRoot);
+  const resolvedTarget = fs.realpathSync(targetDir);
+  const rootPrefix = resolvedRepoRoot.endsWith(path.sep)
+    ? resolvedRepoRoot
+    : resolvedRepoRoot + path.sep;
+  if (resolvedTarget !== resolvedRepoRoot && !resolvedTarget.startsWith(rootPrefix)) {
+    throw new Error(`${label} escapes the repository: ${targetDir}`);
+  }
+  const targetStat = fs.lstatSync(targetDir);
+  if (targetStat.isSymbolicLink() || !targetStat.isDirectory()) {
+    throw new Error(`${label} must be a regular directory: ${targetDir}`);
+  }
+}
+
+function listSkillBundleFiles(bundleDir, repoRoot) {
+  const rootStat = fs.lstatSync(bundleDir);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new Error(`Skill bundle must be a regular directory: ${bundleDir}`);
+  }
+  assertRepositoryContainment(bundleDir, repoRoot, 'Skill bundle');
+  const files = [];
+  function visit(currentDir, relativeDir) {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true })
+      .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Skill bundle contains a symlink: ${fullPath}`);
+      }
+      if (entry.isDirectory()) {
+        visit(fullPath, relativePath);
+      } else if (entry.isFile()) {
+        files.push(relativePath);
+      } else {
+        throw new Error(`Skill bundle contains a non-regular file: ${fullPath}`);
+      }
+    }
+  }
+  visit(bundleDir, '');
+  return files.sort();
+}
+
+function discoverArtifacts(repoRoot = REPO_ROOT) {
   const artifacts = [];
-  const phasesDir = path.join(REPO_ROOT, 'phases');
+  const phasesDir = path.join(repoRoot, 'phases');
   if (!fs.existsSync(phasesDir)) return artifacts;
   const VALID_TYPES = ['skill', 'prompt', 'agent'];
   for (const phaseDirName of fs.readdirSync(phasesDir).sort()) {
@@ -953,8 +1209,12 @@ function discoverArtifacts() {
       const lessonRel = `phases/${phaseDirName}/${lessonDirName}`;
       const outputsDir = path.join(phaseDir, lessonDirName, 'outputs');
       if (fs.existsSync(outputsDir)) {
-        for (const file of fs.readdirSync(outputsDir).sort()) {
-          if (!file.endsWith('.md')) continue;
+        assertRepositoryContainment(outputsDir, repoRoot, 'Lesson outputs');
+        const entries = fs.readdirSync(outputsDir, { withFileTypes: true })
+          .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+        for (const entry of entries) {
+          if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+          const file = entry.name;
           const stem = file.replace(/\.md$/, '');
           const type = VALID_TYPES.find(t => stem.startsWith(`${t}-`));
           if (!type) continue;
@@ -971,6 +1231,35 @@ function discoverArtifacts() {
             lesson: lessonId,
             lessonPath: lessonRel,
             file: `${lessonRel}/outputs/${file}`,
+          });
+        }
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          const bundleDir = path.join(outputsDir, entry.name);
+          const skillPath = path.join(bundleDir, 'SKILL.md');
+          if (!fs.existsSync(skillPath)) continue;
+          const files = listSkillBundleFiles(bundleDir, repoRoot);
+          if (!files.includes('SKILL.md')) continue;
+          let meta = {};
+          try {
+            meta = parseFrontmatter(fs.readFileSync(skillPath, 'utf8')) || {};
+          } catch (_) {}
+          artifacts.push({
+            kind: 'skill',
+            name: (meta.name || entry.name).trim(),
+            description: (meta.description || '').trim(),
+            tags: Array.isArray(meta.tags) ? meta.tags : [],
+            version: (meta.version || '').trim(),
+            ...(meta.license && { license: String(meta.license).trim() }),
+            ...(meta.compatibility && { compatibility: String(meta.compatibility).trim() }),
+            ...(meta['allowed-tools'] && { allowedTools: String(meta['allowed-tools']).trim() }),
+            phase: phaseId,
+            lesson: lessonId,
+            lessonPath: lessonRel,
+            file: `${lessonRel}/outputs/${entry.name}/SKILL.md`,
+            bundle: true,
+            bundlePath: `${lessonRel}/outputs/${entry.name}`,
+            files,
           });
         }
       }
@@ -1056,6 +1345,9 @@ function build() {
   const phases = parseReadme(readme, roadmapStatuses);
   const roadmapPrereqs = parseCurriculumPrereqs(readme, phases);
 
+  console.log('Parsing focused learning paths...');
+  const learningPaths = parseLearningPaths(REPO_ROOT, phases);
+
   console.log('🔍 Parsing glossary/terms.md...');
   const glossaryTerms = parseGlossary(glossary);
 
@@ -1095,6 +1387,7 @@ function build() {
   console.log(`   Glossary terms: ${glossaryTerms.length}`);
   console.log(`   Artifacts: ${artifacts.length}`);
   console.log(`   Curriculum edges: ${Object.values(roadmapPrereqs).reduce((sum, ids) => sum + ids.length, 0)}`);
+  console.log(`   Focused learning paths: ${learningPaths.length}`);
   console.log(`   Certification tracks: ${certifications.tracks.length}`);
   console.log(`   Certification lessons: ${Object.keys(certifications.lessonsByPath).length}`);
   console.log(`   Practice assessments: ${Object.keys(certifications.assessmentsById).length}`);
@@ -1106,6 +1399,8 @@ const output = `// Auto-generated by build.js — do not edit manually.
 const ROADMAP_PREREQS = ${JSON.stringify(roadmapPrereqs, null, 2)};
 
 const PHASES = ${JSON.stringify(phases, null, 2)};
+
+const LEARNING_PATHS = ${JSON.stringify(learningPaths, null, 2)};
 
 const GLOSSARY_CATEGORY_ORDER = ${JSON.stringify(GLOSSARY_CATEGORY_ORDER, null, 2)};
 
@@ -1268,4 +1563,14 @@ function syncCounts(lessons, phaseCount, outputs) {
   }
 }
 
-build();
+if (require.main === module) {
+  build();
+}
+
+module.exports = {
+  discoverArtifacts,
+  parseReadme,
+  parseRoadmap,
+  parseLearningPaths,
+  parseFrontmatter,
+};

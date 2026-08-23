@@ -54,9 +54,19 @@ class McpClientTests(unittest.TestCase):
                 def modern_error(
                     request: dict,
                     timeout_ms: int | None = None,
+                    *,
+                    sink: list[dict] = received,
+                    error_code: int = code,
+                    error_message: str = message,
+                    error_data: dict | None = data,
                 ) -> dict:
-                    received.append(request)
-                    return main.rpc_error(request.get("id"), code, message, data)
+                    sink.append(request)
+                    return main.rpc_error(
+                        request.get("id"),
+                        error_code,
+                        error_message,
+                        error_data,
+                    )
 
                 client = main.MultiServerClient()
                 client.add_server("broken-modern", modern_error, allow_legacy=True)
@@ -98,9 +108,15 @@ class McpClientTests(unittest.TestCase):
             with self.subTest(signal=signal):
                 received = []
 
-                def unavailable(message: dict, timeout_ms: int | None = None) -> dict | None:
-                    received.append(message)
-                    if signal == "closed":
+                def unavailable(
+                    message: dict,
+                    timeout_ms: int | None = None,
+                    *,
+                    sink: list[dict] = received,
+                    current_signal: str = signal,
+                ) -> dict | None:
+                    sink.append(message)
+                    if current_signal == "closed":
                         raise ConnectionError("transport closed")
                     return None
 
@@ -188,6 +204,39 @@ class McpClientTests(unittest.TestCase):
             [message["method"] for message in server.received],
             ["server/discover"],
         )
+
+    def test_request_rejects_a_response_without_result_or_error(self) -> None:
+        server = main.ModernFakeServer("modern", [make_tool("search")])
+        client = main.MultiServerClient()
+        client.add_server("modern", server)
+        client.connect_all()
+
+        def malformed_response(
+            message: dict,
+            timeout_ms: int | None = None,
+        ) -> dict:
+            return {"jsonrpc": "2.0", "id": message["id"]}
+
+        client.peers["modern"].transport = malformed_response
+        with self.assertRaisesRegex(RuntimeError, "exactly one of result or error"):
+            client.discover_tools()
+
+    def test_discovery_rejects_a_boolean_response_id_for_an_integer_request(self) -> None:
+        server = main.ModernFakeServer("modern", [make_tool("search")])
+
+        def boolean_id_response(
+            message: dict,
+            timeout_ms: int | None = None,
+        ) -> dict | None:
+            response = server(message, timeout_ms)
+            if response is not None:
+                response["id"] = True
+            return response
+
+        client = main.MultiServerClient()
+        client.add_server("modern", boolean_id_response)
+        with self.assertRaisesRegex(RuntimeError, "invalid JSON-RPC response envelope"):
+            client.connect_all()
 
     def test_merge_is_deterministic_and_prefixes_collisions(self) -> None:
         alpha = main.ModernFakeServer("alpha", [make_tool("search"), make_tool("write")])

@@ -1,16 +1,22 @@
+import hashlib
 import sys
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from main import (
+    AUTHORIZATION_CODE_TTL_SECONDS,
     MCP_RESOURCE,
     OTHER_MCP_RESOURCE,
     AuthorizationServer,
     Client,
     ResourceServer,
+    b64url,
     protected_resource_metadata_url,
 )
 
@@ -64,6 +70,12 @@ class ProductionAuthTests(unittest.TestCase):
         client.client_metadata["client_name"] = "   "
         with self.assertRaisesRegex(ValueError, "client_name"):
             client.enroll()
+        for redirect_uris in ([], [""], "https://client.example.com/callback"):
+            with self.subTest(redirect_uris=redirect_uris):
+                client = cimd_client(auth)
+                client.client_metadata["redirect_uris"] = redirect_uris
+                with self.assertRaisesRegex(ValueError, "redirect URI"):
+                    client.enroll()
 
     def test_cimd_does_not_require_dcr_application_type(self):
         auth = ready_authorization_server()
@@ -87,6 +99,99 @@ class ProductionAuthTests(unittest.TestCase):
             }
         )
         self.assertEqual("invalid_redirect_uri", response["body"]["error"])
+
+    def test_web_cimd_rejects_insecure_redirect(self):
+        auth = ready_authorization_server()
+        client = cimd_client(auth)
+        client.client_metadata.update(
+            {
+                "application_type": "web",
+                "redirect_uris": ["http://app.example.com/callback"],
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "HTTPS redirect URIs"):
+            client.enroll()
+
+    def test_web_redirects_require_absolute_https_host_without_fragment(self):
+        auth = ready_authorization_server()
+        invalid_redirects = (
+            "https:///callback",
+            "https://app.example.com/callback#fragment",
+        )
+        for redirect_uri in invalid_redirects:
+            with self.subTest(redirect_uri=redirect_uri, enrollment="cimd"):
+                client = cimd_client(auth)
+                client.client_metadata.update(
+                    {
+                        "application_type": "web",
+                        "redirect_uris": [redirect_uri],
+                    }
+                )
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "absolute redirect URIs|host and no fragment",
+                ):
+                    client.enroll()
+            with self.subTest(redirect_uri=redirect_uri, enrollment="dcr"):
+                response = auth.register_client(
+                    {
+                        "application_type": "web",
+                        "redirect_uris": [redirect_uri],
+                    }
+                )
+                self.assertEqual(response["status"], 400)
+                self.assertEqual(response["body"]["error"], "invalid_redirect_uri")
+
+    def test_every_cimd_and_dcr_redirect_is_absolute_and_fragment_free(self):
+        auth = ready_authorization_server()
+        invalid_redirects = (
+            "callback",
+            "/callback",
+            "custom:/callback#fragment",
+            "https://app.example.com/callback#fragment",
+        )
+        for application_type in (None, "native", "web"):
+            for redirect_uri in invalid_redirects:
+                with self.subTest(
+                    enrollment="cimd",
+                    application_type=application_type,
+                    redirect_uri=redirect_uri,
+                ):
+                    client = cimd_client(auth)
+                    client.client_metadata["redirect_uris"] = [redirect_uri]
+                    if application_type is not None:
+                        client.client_metadata["application_type"] = application_type
+                    with self.assertRaisesRegex(ValueError, "absolute redirect URIs"):
+                        client.enroll()
+
+        for application_type in ("native", "web"):
+            for redirect_uri in invalid_redirects:
+                with self.subTest(
+                    enrollment="dcr",
+                    application_type=application_type,
+                    redirect_uri=redirect_uri,
+                ):
+                    response = auth.register_client(
+                        {
+                            "application_type": application_type,
+                            "redirect_uris": [redirect_uri],
+                        }
+                    )
+                    self.assertEqual(response["status"], 400)
+                    self.assertEqual(
+                        response["body"]["error"], "invalid_redirect_uri"
+                    )
+
+    def test_native_redirect_policy_rejects_remote_cleartext_http(self):
+        auth = ready_authorization_server()
+        response = auth.register_client(
+            {
+                "application_type": "native",
+                "redirect_uris": ["http://app.example.com/callback"],
+            }
+        )
+        self.assertEqual(response["status"], 400)
+        self.assertEqual(response["body"]["error"], "invalid_redirect_uri")
 
     def test_dcr_fallback_records_native_application_type(self):
         auth = ready_authorization_server()
@@ -158,6 +263,7 @@ class ProductionAuthTests(unittest.TestCase):
             client_id=client_id,
             redirect_uri=redirect_uri,
             code_challenge="not-the-wrong-verifier-hash",
+            code_challenge_method="S256",
             scopes={"mcp:tools.invoke"},
             resource=MCP_RESOURCE,
             user="alice",
@@ -170,6 +276,120 @@ class ProductionAuthTests(unittest.TestCase):
                 code_verifier="wrong-verifier",
                 resource=MCP_RESOURCE,
             )
+
+    def test_authorization_requires_s256_challenge_method(self):
+        auth = ready_authorization_server()
+        client = cimd_client(auth)
+        client_id = client.enroll()
+        with self.assertRaisesRegex(ValueError, "code_challenge_method S256"):
+            auth.begin_authorization(
+                client_id=client_id,
+                redirect_uri=client.client_metadata["redirect_uris"][0],
+                code_challenge="challenge",
+                code_challenge_method="plain",
+                scopes={"mcp:tools.invoke"},
+                resource=MCP_RESOURCE,
+                user="alice",
+            )
+
+    def test_authorization_code_expires_and_is_removed(self):
+        auth = ready_authorization_server()
+        client = cimd_client(auth)
+        client_id = client.enroll()
+        redirect_uri = client.client_metadata["redirect_uris"][0]
+        with patch("main.time.time", return_value=1_000):
+            response = auth.begin_authorization(
+                client_id=client_id,
+                redirect_uri=redirect_uri,
+                code_challenge="challenge",
+                code_challenge_method="S256",
+                scopes={"mcp:tools.invoke"},
+                resource=MCP_RESOURCE,
+                user="alice",
+            )
+        record = auth.authorization_codes[response["code"]]
+        self.assertEqual(record["code_challenge_method"], "S256")
+        self.assertEqual(record["expires_at"], 1_000 + AUTHORIZATION_CODE_TTL_SECONDS)
+        with patch("main.time.time", return_value=1_301):
+            with self.assertRaisesRegex(ValueError, "expired"):
+                auth.redeem_code(
+                    code=response["code"],
+                    client_id=client_id,
+                    redirect_uri=redirect_uri,
+                    code_verifier="irrelevant-after-expiry",
+                    resource=MCP_RESOURCE,
+                )
+        self.assertNotIn(response["code"], auth.authorization_codes)
+
+    def test_authorization_code_redemption_is_atomic(self):
+        auth = ready_authorization_server()
+        client = cimd_client(auth)
+        client_id = client.enroll()
+        redirect_uri = client.client_metadata["redirect_uris"][0]
+        verifier = "two-thread-verifier"
+        challenge = b64url(hashlib.sha256(verifier.encode()).digest())
+        response = auth.begin_authorization(
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            code_challenge=challenge,
+            code_challenge_method="S256",
+            scopes={"mcp:tools.invoke"},
+            resource=MCP_RESOURCE,
+            user="alice",
+        )
+        barrier = threading.Barrier(2)
+
+        def redeem() -> tuple[str, str]:
+            barrier.wait(timeout=2)
+            try:
+                return (
+                    "success",
+                    auth.redeem_code(
+                        code=response["code"],
+                        client_id=client_id,
+                        redirect_uri=redirect_uri,
+                        code_verifier=verifier,
+                        resource=MCP_RESOURCE,
+                    ),
+                )
+            except ValueError as exc:
+                return "error", str(exc)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(lambda _: redeem(), range(2)))
+
+        self.assertEqual(sum(kind == "success" for kind, _ in outcomes), 1)
+        self.assertEqual(sum(kind == "error" for kind, _ in outcomes), 1)
+        error_messages = [value for kind, value in outcomes if kind == "error"]
+        self.assertEqual(
+            error_messages,
+            ["authorization code is invalid or already used"],
+        )
+
+    def test_new_authorization_prunes_abandoned_expired_codes(self):
+        auth = ready_authorization_server()
+        client = cimd_client(auth)
+        client_id = client.enroll()
+        redirect_uri = client.client_metadata["redirect_uris"][0]
+        request = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "code_challenge": "challenge",
+            "code_challenge_method": "S256",
+            "scopes": {"mcp:tools.invoke"},
+            "resource": MCP_RESOURCE,
+            "user": "alice",
+        }
+        with patch("main.time.time", return_value=1_000):
+            abandoned = auth.begin_authorization(**request)["code"]
+        with patch("main.time.time", return_value=1_200):
+            active = auth.begin_authorization(**request)["code"]
+        with patch("main.time.time", return_value=1_301):
+            newest = auth.begin_authorization(**request)["code"]
+
+        self.assertNotIn(abandoned, auth.authorization_codes)
+        self.assertIn(active, auth.authorization_codes)
+        self.assertIn(newest, auth.authorization_codes)
 
     def test_authorization_code_is_single_use_and_token_cache_is_resource_bound(self):
         auth = ready_authorization_server()

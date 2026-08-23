@@ -199,6 +199,8 @@ def tasks_get(task_id: str, meta: dict) -> dict:
     invalid = validate_request_meta(meta, require_tasks=True)
     if invalid:
         return invalid
+    if not isinstance(task_id, str):
+        return protocol_error(-32602, "Unknown taskId")
     task = TASKS.get(task_id)
     if task is None:
         return protocol_error(-32602, "Unknown taskId")

@@ -136,6 +136,13 @@ class ToolEcosystemTests(unittest.TestCase):
             {"extensions": {main.TASK_EXTENSION: {}}},
         )
 
+    def test_tasks_get_rejects_non_string_ids_without_hashing_them(self) -> None:
+        for task_id in ([], {}):
+            with self.subTest(task_id=task_id):
+                result = main.tasks_get(task_id, main.request_meta(tasks=True))
+                self.assertEqual(result["error"]["code"], -32602)
+                self.assertEqual(result["error"]["message"], "Unknown taskId")
+
     def test_delegation_span_uses_current_a2a_operation_name(self) -> None:
         main.gateway_call(
             "tok_alice",

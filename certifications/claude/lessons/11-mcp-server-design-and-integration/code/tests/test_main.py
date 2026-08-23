@@ -79,24 +79,82 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(response["error"]["code"], -32602)
         self.assertIn("_meta", response["error"]["message"])
 
-    def test_invalid_request_id_is_not_reflected_by_envelope_errors(self):
+    def test_invalid_request_ids_with_valid_envelope_use_null_error_id(self):
         for request_id in (None, True, 1.5, [], {}):
             with self.subTest(request_id=request_id):
                 request = self.wire_request("tools/list", request_id=request_id)
-                request["jsonrpc"] = "1.0"
                 response, notifications = self.server.exchange(request)
                 self.assertEqual(response["id"], None)
                 self.assertEqual(response["error"]["code"], -32600)
                 self.assertEqual(notifications, [])
 
+    def test_malformed_json_rpc_version_preserves_valid_request_id(self):
+        request = self.wire_request("tools/list", request_id=7)
+        request["jsonrpc"] = "1.0"
+
+        response, notifications = self.server.exchange(request)
+
+        self.assertEqual(response["id"], 7)
+        self.assertEqual(response["error"]["code"], -32600)
+        self.assertEqual(notifications, [])
+
     def test_structurally_valid_notifications_emit_no_json_rpc_response(self):
-        notification = self.wire_request("tools/list")
-        notification.pop("id")
+        notification = {
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": 9, "reason": "client stopped waiting"},
+        }
 
         response, notifications = self.server.exchange(notification)
 
         self.assertIsNone(response)
         self.assertEqual(notifications, [])
+
+    def test_request_only_methods_without_ids_are_silent(self):
+        requests = (
+            self.wire_request("server/discover"),
+            self.wire_request("tools/list"),
+            self.wire_request(
+                "tools/call",
+                {"name": "add", "arguments": {"a": 1, "b": 2}},
+            ),
+        )
+        for request in requests:
+            request.pop("id")
+            with self.subTest(method=request["method"]):
+                response, notifications = self.server.exchange(request)
+                self.assertIsNone(response)
+                self.assertEqual(notifications, [])
+
+    def test_malformed_unknown_and_wrong_direction_notifications_are_silent(self):
+        notifications_to_ignore = (
+            {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": []},
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {},
+            },
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": True},
+            },
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": 1, "reason": []},
+            },
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/progress",
+                "params": {"progressToken": "p", "progress": 1},
+            },
+        )
+        for notification in notifications_to_ignore:
+            with self.subTest(notification=notification):
+                response, notifications = self.server.exchange(notification)
+                self.assertIsNone(response)
+                self.assertEqual(notifications, [])
 
     def test_malformed_no_id_objects_return_invalid_request(self):
         malformed_requests = (
@@ -287,6 +345,35 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(retry["resultType"], "input_required")
         self.assertEqual(list(retry["inputRequests"]), ["review_goal"])
         self.assertEqual(retry["requestState"], initial["requestState"])
+
+    def test_malformed_mrtr_response_objects_are_invalid_params(self):
+        initial = self.client.request(
+            "tools/call",
+            {"name": "prepare_review", "arguments": {"topic": "release safety"}},
+        )
+        valid_responses = self.client.fulfill(initial["inputRequests"])
+        malformed = (
+            ("workspace_scope", []),
+            ("review_sample", "not-an-object"),
+            ("review_goal", 7),
+            ("review_goal", {"action": "accept", "content": []}),
+        )
+        for key, value in malformed:
+            with self.subTest(key=key, value=value):
+                responses = {**valid_responses, key: value}
+                response = self.server.handle(
+                    self.wire_request(
+                        "tools/call",
+                        {
+                            "name": "prepare_review",
+                            "arguments": {"topic": "release safety"},
+                            "inputResponses": responses,
+                            "requestState": initial["requestState"],
+                        },
+                        capabilities={"roots": {}, "sampling": {}, "elicitation": {}},
+                    )
+                )
+                self.assertEqual(response["error"]["code"], -32602)
 
     def test_current_streamable_http_has_no_protocol_session_endpoints(self):
         profile = streamable_http_profile()

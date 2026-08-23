@@ -142,6 +142,34 @@ class ProductionAuthTests(unittest.TestCase):
                 self.assertEqual(response["status"], 400)
                 self.assertEqual(response["body"]["error"], "invalid_redirect_uri")
 
+    def test_web_redirects_reject_malformed_and_out_of_range_ports(self):
+        auth = ready_authorization_server()
+        invalid_redirects = (
+            "https://app.example.com:not-a-port/callback",
+            "https://app.example.com:65536/callback",
+        )
+        for redirect_uri in invalid_redirects:
+            with self.subTest(redirect_uri=redirect_uri, enrollment="cimd"):
+                client = cimd_client(auth)
+                client.client_metadata.update(
+                    {
+                        "application_type": "web",
+                        "redirect_uris": [redirect_uri],
+                    }
+                )
+                with self.assertRaisesRegex(ValueError, "absolute redirect URIs"):
+                    client.enroll()
+
+            with self.subTest(redirect_uri=redirect_uri, enrollment="dcr"):
+                response = auth.register_client(
+                    {
+                        "application_type": "web",
+                        "redirect_uris": [redirect_uri],
+                    }
+                )
+                self.assertEqual(400, response["status"])
+                self.assertEqual("invalid_redirect_uri", response["body"]["error"])
+
     def test_every_cimd_and_dcr_redirect_is_absolute_and_fragment_free(self):
         auth = ready_authorization_server()
         invalid_redirects = (

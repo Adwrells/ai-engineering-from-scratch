@@ -107,6 +107,7 @@ def parsed_absolute_redirect_uri(value: object):
     try:
         parsed = urlparse(value)
         hostname = parsed.hostname
+        _ = parsed.port
     except ValueError:
         return None
     if not parsed.scheme or parsed.fragment or parsed.username is not None or parsed.password is not None:

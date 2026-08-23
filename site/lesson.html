@@ -1439,6 +1439,81 @@
       text-align: left;
     }
 
+    .learning-path-preflights {
+      display: grid;
+      gap: 10px;
+      margin: 18px 0 2px;
+      padding-top: 16px;
+      border-top: 1px solid var(--rule-soft);
+    }
+
+    .learning-path-preflight {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px 18px;
+      align-items: center;
+      padding: 14px 16px;
+      border: 1px solid var(--rule-soft);
+      background: var(--code-bg);
+    }
+
+    .learning-path-preflight-copy { min-width: 0; }
+
+    .learning-path-preflight-label,
+    .learning-path-preflight-status {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .learning-path-preflight-label {
+      color: var(--blueprint);
+      margin-bottom: 5px;
+    }
+
+    .learning-path-preflight-title {
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+
+    .learning-path-preflight-description {
+      color: var(--ink-soft);
+      font-family: var(--font-body);
+      font-size: 0.88rem;
+      line-height: 1.45;
+      margin-top: 4px;
+    }
+
+    .learning-path-preflight-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .learning-path-preflight-status { color: var(--ink-mute); }
+    .learning-path-preflight.confirmed { border-color: var(--blueprint); }
+    .learning-path-preflight.confirmed .learning-path-preflight-status { color: var(--blueprint); }
+
+    .learning-path-confirm[disabled] {
+      cursor: default;
+      opacity: 0.7;
+    }
+
+    .learning-path-locked {
+      cursor: not-allowed;
+      opacity: 0.48;
+    }
+
+    .learning-path-locked:hover {
+      color: var(--ink-mute);
+      border-color: transparent;
+    }
+
     .phase-complete-callout {
       font-family: var(--font-mono);
       font-size: 0.85rem;
@@ -1810,6 +1885,12 @@
       .output-btn {
         text-align: center;
       }
+      .learning-path-preflight {
+        grid-template-columns: 1fr;
+      }
+      .learning-path-preflight-actions {
+        align-items: stretch;
+      }
       .timeline-item { min-width: 70px; }
       .timeline-line { width: 20px; }
     }
@@ -1910,6 +1991,105 @@
   </script>
   <script src="content-source.js?v=20260821a"></script>
   <script src="progress.js?v=20260801a"></script>
+  <script id="learningPathProgressRuntime">
+    (function (root) {
+      'use strict';
+
+      var STORAGE_KEY = 'aifs:learning-path-progress:v1';
+
+      function emptyState() {
+        return { version: 1, paths: {} };
+      }
+
+      function createStore(storage) {
+        var memoryState = emptyState();
+
+        function read() {
+          try {
+            var raw = storage && storage.getItem(STORAGE_KEY);
+            var parsed = raw ? JSON.parse(raw) : null;
+            if (parsed && parsed.version === 1 && parsed.paths && typeof parsed.paths === 'object') {
+              memoryState = parsed;
+            }
+          } catch (_) {}
+          return memoryState;
+        }
+
+        function write(state) {
+          memoryState = state;
+          try {
+            if (storage) storage.setItem(STORAGE_KEY, JSON.stringify(state));
+          } catch (_) {}
+          return true;
+        }
+
+        function checkIds(entry) {
+          if (!entry || !Array.isArray(entry.prerequisiteChecks)) return [];
+          return entry.prerequisiteChecks.filter(function (id) {
+            return typeof id === 'string' && id.length > 0;
+          });
+        }
+
+        function prerequisitePaths(entry) {
+          if (!entry || !Array.isArray(entry.prerequisitePaths)) return [];
+          return entry.prerequisitePaths.filter(function (lessonPath) {
+            return typeof lessonPath === 'string' && lessonPath.length > 0;
+          });
+        }
+
+        function isConfirmed(pathId, checkId) {
+          var state = read();
+          return !!(state.paths[pathId] && state.paths[pathId].checks && state.paths[pathId].checks[checkId]);
+        }
+
+        function confirm(pathId, checkId) {
+          if (typeof pathId !== 'string' || !pathId || typeof checkId !== 'string' || !checkId) return false;
+          var state = read();
+          if (!state.paths[pathId] || typeof state.paths[pathId] !== 'object') state.paths[pathId] = {};
+          if (!state.paths[pathId].checks || typeof state.paths[pathId].checks !== 'object') state.paths[pathId].checks = {};
+          state.paths[pathId].checks[checkId] = true;
+          return write(state);
+        }
+
+        function unmetChecks(path, entry) {
+          if (!path || typeof path.id !== 'string') return [];
+          var prerequisites = Array.isArray(path.prerequisites) ? path.prerequisites : [];
+          return checkIds(entry).filter(function (checkId) {
+            return !isConfirmed(path.id, checkId);
+          }).map(function (checkId) {
+            return prerequisites.find(function (candidate) {
+              return candidate && candidate.id === checkId;
+            });
+          }).filter(Boolean);
+        }
+
+        function unmetPaths(entry, isLessonComplete) {
+          return prerequisitePaths(entry).filter(function (lessonPath) {
+            return typeof isLessonComplete !== 'function' || !isLessonComplete(lessonPath);
+          });
+        }
+
+        return {
+          storageKey: STORAGE_KEY,
+          isConfirmed: isConfirmed,
+          confirm: confirm,
+          unmetChecks: unmetChecks,
+          unmetPaths: unmetPaths,
+          firstUnmetCheckId: function (path, entry) {
+            var first = unmetChecks(path, entry)[0];
+            return first ? first.id : '';
+          },
+          canEnter: function (path, entry, isLessonComplete) {
+            return unmetChecks(path, entry).length === 0 &&
+              unmetPaths(entry, isLessonComplete).length === 0;
+          },
+          createForStorage: createStore
+        };
+      }
+
+      root.AIFSLearningPathProgress = createStore(root.localStorage);
+    }(window));
+  </script>
   <script src="header.js?v=20260808h" defer></script>
   <script src="cmdpalette.js?v=20260821a" defer></script>
   <script src="figures.js?v=20260801a"></script>
@@ -2151,9 +2331,81 @@
         });
       }
 
+      function learningPathPrerequisiteChecks(entry) {
+        if (!learningPathMode || !window.AIFSLearningPathProgress) return [];
+        return window.AIFSLearningPathProgress.unmetChecks(learningPath, entry);
+      }
+
+      function learningPathCheckIds(entry) {
+        return entry && Array.isArray(entry.prerequisiteChecks)
+          ? entry.prerequisiteChecks.filter(function (id) { return typeof id === 'string' && id.length > 0; })
+          : [];
+      }
+
+      function learningPathPrerequisitePaths(entry) {
+        return entry && Array.isArray(entry.prerequisitePaths)
+          ? entry.prerequisitePaths.filter(function (path) { return typeof path === 'string' && path.length > 0; })
+          : [];
+      }
+
+      function learningPathEntryLocked(entry) {
+        return unmetLearningPathPrerequisites(entry).length > 0 ||
+          learningPathPrerequisiteChecks(entry).length > 0;
+      }
+
+      function learningPathGateClass(entry) {
+        return learningPathEntryLocked(entry) ? ' learning-path-locked' : '';
+      }
+
+      function learningPathGateAttributes(entry) {
+        var ids = learningPathCheckIds(entry);
+        var paths = learningPathPrerequisitePaths(entry);
+        if (!ids.length && !paths.length) return '';
+        var locked = learningPathEntryLocked(entry);
+        return ' data-learning-path-id="' + escapeAttr(learningPath.id) + '"' +
+          ' data-learning-path-gate="true"' +
+          ' data-prerequisite-checks="' + escapeAttr(ids.join(' ')) + '"' +
+          ' data-prerequisite-paths="' + escapeAttr(paths.join(' ')) + '"' +
+          (locked ? ' aria-disabled="true"' : '');
+      }
+
+      function learningPathPreflightDefinitions() {
+        if (!learningPathMode) return [];
+        var referenced = {};
+        for (var lessonIndex = 0; lessonIndex < flatLessons.length; lessonIndex++) {
+          var ids = learningPathCheckIds(flatLessons[lessonIndex]);
+          for (var checkIndex = 0; checkIndex < ids.length; checkIndex++) referenced[ids[checkIndex]] = true;
+        }
+        var definitions = Array.isArray(learningPath.prerequisites) ? learningPath.prerequisites : [];
+        return Object.keys(referenced).map(function (id) {
+          return definitions.find(function (entry) { return entry && entry.id === id; });
+        }).filter(Boolean);
+      }
+
+      function learningPathPreflightHtml() {
+        var checks = learningPathPreflightDefinitions();
+        if (!checks.length) return '';
+        var html = '<div class="learning-path-preflights" aria-label="Knowledge preflights">';
+        for (var index = 0; index < checks.length; index++) {
+          var check = checks[index];
+          var confirmed = window.AIFSLearningPathProgress && window.AIFSLearningPathProgress.isConfirmed(learningPath.id, check.id);
+          html += '<div class="learning-path-preflight' + (confirmed ? ' confirmed' : '') + '" data-learning-path-preflight="' + escapeAttr(check.id) + '">';
+          html += '<div class="learning-path-preflight-copy"><div class="learning-path-preflight-label">Required knowledge preflight</div>';
+          html += '<div class="learning-path-preflight-title">' + escapeHtml(check.title || check.id) + '</div>';
+          if (check.description) html += '<div class="learning-path-preflight-description">' + escapeHtml(check.description) + '</div>';
+          html += '</div><div class="learning-path-preflight-actions">';
+          html += '<div class="learning-path-preflight-status" role="status" aria-live="polite">' + (confirmed ? 'Confirmed' : 'Confirmation required') + '</div>';
+          html += '<button type="button" class="output-btn learning-path-confirm" data-learning-path-check-id="' + escapeAttr(check.id) + '" aria-pressed="' + (confirmed ? 'true' : 'false') + '" onclick="confirmLearningPathCheck(this)"' + (confirmed ? ' disabled' : '') + '>' + (confirmed ? 'Confirmed' : 'Confirm preflight') + '</button>';
+          html += '</div></div>';
+        }
+        html += '</div>';
+        return html;
+      }
+
       function learningPathPrerequisiteCallout(entry, heading) {
         var unmet = unmetLearningPathPrerequisites(entry);
-        if (!unmet.length) return '';
+        var unmetChecks = learningPathPrerequisiteChecks(entry);
+        if (!unmet.length && !unmetChecks.length) return '';
         var html = '<div class="continue-callout prerequisite-callout"><strong>' + escapeHtml(heading || 'Prerequisite check') + '</strong><br>';
         for (var index = 0; index < unmet.length; index++) {
           var prerequisitePath = unmet[index];
@@ -2172,9 +2424,74 @@
         if (unmet.some(function (prerequisitePath) { return !learningPathContains(learningPath, prerequisitePath); })) {
           html += '<br><span>The external prerequisite opens in a new tab so this focused route stays in place.</span>';
         }
+        for (var checkIndex = 0; checkIndex < unmetChecks.length; checkIndex++) {
+          var check = unmetChecks[checkIndex];
+          if (unmet.length || checkIndex > 0) html += '<br>';
+          html += '<span>Knowledge preflight: ' + escapeHtml(check.title || check.id) + '.</span>';
+          html += '<button type="button" class="output-btn learning-path-confirm" data-learning-path-check-id="' + escapeAttr(check.id) + '" aria-pressed="false" onclick="confirmLearningPathCheck(this)">Confirm preflight</button>';
+        }
         html += '</div>';
         return html;
       }
+
+      function linkUnmetLearningPathCheckIds(link) {
+        if (!learningPathMode || !link || !window.AIFSLearningPathProgress) return [];
+        var ids = (link.getAttribute('data-prerequisite-checks') || '').split(/\s+/).filter(Boolean);
+        return ids.filter(function (id) {
+          return !window.AIFSLearningPathProgress.isConfirmed(learningPath.id, id);
+        });
+      }
+
+      function linkHasUnmetLearningPathPrerequisite(link) {
+        if (!learningPathMode || !link) return false;
+        var paths = (link.getAttribute('data-prerequisite-paths') || '').split(/\s+/).filter(Boolean);
+        var unmetPaths = paths.some(function (path) {
+          return !(window.AIFSProgress && window.AIFSProgress.isLessonComplete(path));
+        });
+        return unmetPaths || linkUnmetLearningPathCheckIds(link).length > 0;
+      }
+
+      function syncLearningPathGateLinks() {
+        var links = document.querySelectorAll('a[data-learning-path-gate]');
+        for (var index = 0; index < links.length; index++) {
+          var locked = linkHasUnmetLearningPathPrerequisite(links[index]);
+          links[index].classList.toggle('learning-path-locked', locked);
+          if (locked) links[index].setAttribute('aria-disabled', 'true');
+          else links[index].removeAttribute('aria-disabled');
+          var label = links[index].querySelector('[data-learning-path-gate-label]');
+          if (label) label.textContent = locked ? 'Locked' : 'Next \u2192';
+        }
+      }
+
+      function findLearningPathConfirmButton(checkId) {
+        var buttons = document.querySelectorAll('[data-learning-path-check-id]');
+        for (var index = 0; index < buttons.length; index++) {
+          if (buttons[index].getAttribute('data-learning-path-check-id') === checkId && !buttons[index].disabled) return buttons[index];
+        }
+        return null;
+      }
+
+      function initLearningPathGateNavigation() {
+        document.addEventListener('click', function (event) {
+          var link = event.target && event.target.closest ? event.target.closest('a[data-learning-path-gate]') : null;
+          if (!link || !linkHasUnmetLearningPathPrerequisite(link)) return;
+          event.preventDefault();
+          var firstId = linkUnmetLearningPathCheckIds(link)[0] || '';
+          var button = findLearningPathConfirmButton(firstId);
+          if (button) {
+            button.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
+            button.focus();
+          }
+        });
+      }
+
+      window.confirmLearningPathCheck = function (button) {
+        if (!learningPathMode || !button || !window.AIFSLearningPathProgress) return false;
+        var checkId = button.getAttribute('data-learning-path-check-id') || '';
+        if (!window.AIFSLearningPathProgress.confirm(learningPath.id, checkId)) return false;
+        refreshProgressUi();
+        return true;
+      };
 
       function lessonProgressClass(path, readable) {
         if (!readable) return 'planned';
@@ -2337,6 +2654,9 @@
               required: lp < requiredCount && (!pathEntry || typeof pathEntry === 'string' || pathEntry.required !== false),
               prerequisitePaths: pathEntry && typeof pathEntry === 'object' && Array.isArray(pathEntry.prerequisitePaths)
                 ? pathEntry.prerequisitePaths.slice()
+                : [],
+              prerequisiteChecks: pathEntry && typeof pathEntry === 'object' && Array.isArray(pathEntry.prerequisiteChecks)
+                ? pathEntry.prerequisiteChecks.slice()
                 : []
             });
             if (pathValue === lessonPath) {
@@ -2435,7 +2755,7 @@
           for (var lpi = 0; lpi < requiredPathLessons.length; lpi++) {
             var pathLesson = requiredPathLessons[lpi];
             var pathActive = pathLesson.path === lessonPath;
-            pathHtml += '<a class="sidebar-lesson-link' + (pathActive ? ' active' : '') + '" href="' + learningPathLessonHref(pathLesson.path) + '">';
+            pathHtml += '<a class="sidebar-lesson-link' + (pathActive ? ' active' : '') + learningPathGateClass(pathLesson) + '" href="' + learningPathLessonHref(pathLesson.path) + '"' + learningPathGateAttributes(pathLesson) + '>';
             pathHtml += '<span class="sidebar-lesson-dot ' + lessonProgressClass(pathLesson.path, true) + '"></span>';
             pathHtml += escapeHtml(pathLesson.lessonName) + '</a>';
           }
@@ -2444,7 +2764,7 @@
             for (var lpo = 0; lpo < optionalPathLessons.length; lpo++) {
               var optionalLesson = optionalPathLessons[lpo];
               var optionalActive = optionalLesson.path === lessonPath;
-              pathHtml += '<a class="sidebar-lesson-link' + (optionalActive ? ' active' : '') + '" href="' + learningPathLessonHref(optionalLesson.path) + '">';
+              pathHtml += '<a class="sidebar-lesson-link' + (optionalActive ? ' active' : '') + learningPathGateClass(optionalLesson) + '" href="' + learningPathLessonHref(optionalLesson.path) + '"' + learningPathGateAttributes(optionalLesson) + '>';
               pathHtml += '<span class="sidebar-lesson-dot ' + lessonProgressClass(optionalLesson.path, true) + '"></span>';
               pathHtml += escapeHtml(optionalLesson.lessonName) + '</a>';
             }
@@ -3923,8 +4243,9 @@
           nav += '<div></div>';
         }
         if (next) {
-          nav += '<a class="lesson-nav-btn next" href="lesson.html?path=' + encodeURIComponent(next.path) + trackSuffix + '">';
-          nav += '<span class="nav-label">Next &rarr;</span>';
+          var nextLocked = learningPathMode && learningPathEntryLocked(next);
+          nav += '<a class="lesson-nav-btn next' + (learningPathMode ? learningPathGateClass(next) : '') + '" href="lesson.html?path=' + encodeURIComponent(next.path) + trackSuffix + '"' + (learningPathMode ? learningPathGateAttributes(next) : '') + '>';
+          nav += '<span class="nav-label" data-learning-path-gate-label>' + (nextLocked ? 'Locked' : 'Next &rarr;') + '</span>';
           nav += '<span class="nav-title">' + escapeHtml(next.lessonName) + '</span>';
           nav += '</a>';
         }
@@ -4398,12 +4719,23 @@
       function refreshProgressUi() {
         buildSidebar();
         var container = document.getElementById('aiPanels');
-        if (container) renderLearningPathPanel(container);
+        if (container) {
+          renderLearningPathPanel(container);
+          if (learningPathMode) renderContinuePanel(container);
+        }
+        syncLearningPathGateLinks();
       }
 
       function mountLearningPathPanel(container, panel) {
         panel.id = 'learningPathPanel';
         var existing = document.getElementById('learningPathPanel');
+        if (existing && existing.parentNode) existing.parentNode.replaceChild(panel, existing);
+        else container.appendChild(panel);
+      }
+
+      function mountContinuePanel(container, panel) {
+        panel.id = 'continuePathPanel';
+        var existing = document.getElementById('continuePathPanel');
         if (existing && existing.parentNode) existing.parentNode.replaceChild(panel, existing);
         else container.appendChild(panel);
       }
@@ -4469,6 +4801,7 @@
           var focusedPct = focusedLessons.length ? Math.round((focusedDone / focusedLessons.length) * 100) : 0;
           var focusedHtml = '<div class="ai-panel-header"><div class="ai-panel-icon">P</div><div class="ai-panel-title">Focused Learning Path</div></div>';
           focusedHtml += '<div class="ai-panel-subtitle">' + escapeHtml(learningPath.title || learningPath.id) + '</div>';
+          focusedHtml += learningPathPreflightHtml();
           focusedHtml += '<div class="learning-timeline">';
           for (var fpi = 0; fpi < focusedLessons.length; fpi++) {
             var focusedLesson = focusedLessons[fpi];
@@ -4478,7 +4811,7 @@
               focusedHtml += '<div class="timeline-line ' + (focusedPreviousDone && focusedLessonDone ? 'done' : '') + '"></div>';
             }
             var focusedClass = focusedLesson.path === lessonPath ? 'current' : focusedLessonDone ? 'done' : '';
-            focusedHtml += '<a class="timeline-item ' + focusedClass + '" href="' + learningPathLessonHref(focusedLesson.path) + '" title="' + escapeAttr(focusedLesson.lessonName) + '">';
+            focusedHtml += '<a class="timeline-item ' + focusedClass + learningPathGateClass(focusedLesson) + '" href="' + learningPathLessonHref(focusedLesson.path) + '" title="' + escapeAttr(focusedLesson.lessonName) + '"' + learningPathGateAttributes(focusedLesson) + '>';
             focusedHtml += '<div class="timeline-dot"></div><div class="timeline-label">' + escapeHtml(focusedLesson.lessonName) + '</div></a>';
           }
           focusedHtml += '</div><div class="phase-progress-bar"><div class="phase-progress-fill" style="--lesson-progress:' + (focusedPct / 100) + '"></div></div>';
@@ -4486,6 +4819,11 @@
           focusedHtml += focusedIndex >= 0
             ? 'Lesson ' + (focusedIndex + 1) + ' of ' + focusedLessons.length + ' in this path. ' + focusedDone + ' completed.'
             : 'Optional lesson. ' + focusedDone + ' of ' + focusedLessons.length + ' required lessons completed.';
+          var focusedChecks = learningPathPreflightDefinitions();
+          var focusedChecksDone = focusedChecks.filter(function (check) {
+            return window.AIFSLearningPathProgress && window.AIFSLearningPathProgress.isConfirmed(learningPath.id, check.id);
+          }).length;
+          if (focusedChecks.length) focusedHtml += ' ' + focusedChecksDone + ' of ' + focusedChecks.length + ' knowledge preflights confirmed.';
           focusedHtml += '</div>';
           if (focusedIndex >= 0) {
             focusedHtml += learningPathPrerequisiteCallout(focusedLessons[focusedIndex], 'Required before this lesson');
@@ -4624,7 +4962,8 @@
           }
           focusedContinueHtml += '<div class="continue-links">';
           if (nextRequired) {
-            focusedContinueHtml += '<a class="continue-link" href="' + learningPathLessonHref(nextRequired.path) + '">Next: ' + escapeHtml(nextRequired.lessonName) + '</a>';
+            var nextRequiredLocked = learningPathEntryLocked(nextRequired);
+            focusedContinueHtml += '<a class="continue-link' + learningPathGateClass(nextRequired) + '" href="' + learningPathLessonHref(nextRequired.path) + '"' + learningPathGateAttributes(nextRequired) + '>' + (nextRequiredLocked ? 'Locked: ' : 'Next: ') + escapeHtml(nextRequired.lessonName) + '</a>';
           } else {
             for (var oi = 0; oi < optionalLessons.length; oi++) {
               if (optionalLessons[oi].path === lessonPath) continue;
@@ -4637,7 +4976,7 @@
           focusedContinueHtml += '<a class="continue-link" href="catalog.html">Full course catalog</a></div>';
           focusedContinueHtml += '<div class="continue-callout">' + escapeHtml(learningPath.summary || 'Follow the ordered lessons to build, invoke, secure, evaluate, and package an agent skill.') + '</div></div>';
           focusedContinue.innerHTML = focusedContinueHtml;
-          container.appendChild(focusedContinue);
+          mountContinuePanel(container, focusedContinue);
           return;
         }
 
@@ -4692,6 +5031,7 @@
         buildSidebar();
         initSidebarToggle();
         initScrollProgress();
+        initLearningPathGateNavigation();
         if (window.AIFSProgress) window.AIFSProgress.onChange(refreshProgressUi);
         fetchLesson(lessonPath);
       }

@@ -37,7 +37,14 @@ from pathlib import Path
 from typing import Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib import parse_frontmatter  # noqa: E402
+from _lib import (  # noqa: E402
+    ArtifactPathError,
+    BundleValidationError,
+    parse_frontmatter,
+    validate_repository_directory,
+    validate_repository_file,
+    validate_skill_bundle,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 PHASES_DIR = ROOT / "phases"
@@ -57,6 +64,7 @@ class Artifact:
     tags: list[str]
     source: Path
     bundle_root: Path | None = None
+    bundle_files: list[str] = field(default_factory=list)
 
     def to_dict(self, target: Path | None = None) -> dict:
         out: dict[str, object] = {
@@ -72,7 +80,7 @@ class Artifact:
         if self.bundle_root is not None:
             out["bundle"] = True
             out["bundle_path"] = self.bundle_root.relative_to(ROOT).as_posix()
-            out["files"] = validate_bundle(self.bundle_root)
+            out["files"] = list(self.bundle_files)
         if target is not None:
             out["target"] = target.as_posix()
         return out
@@ -112,6 +120,7 @@ def artifact_from_markdown(
     artifact_type: str,
     fallback_name: str,
     bundle_root: Path | None = None,
+    bundle_files: list[str] | None = None,
 ) -> Artifact | None:
     try:
         text = path.read_text(encoding="utf-8")
@@ -140,6 +149,7 @@ def artifact_from_markdown(
         tags=list(tags_raw) if isinstance(tags_raw, list) else [],
         source=path,
         bundle_root=bundle_root,
+        bundle_files=list(bundle_files or []),
     )
 
 
@@ -148,9 +158,11 @@ def discover_artifacts() -> Iterable[Artifact]:
         return
     output_dirs = sorted(PHASES_DIR.glob("*/[0-9][0-9]-*/outputs"))
     for output_dir in output_dirs:
+        validate_output_directory(output_dir)
+    for output_dir in output_dirs:
         paths = sorted(output_dir.iterdir())
         for path in paths:
-            if path.suffix != ".md" or not path.is_file():
+            if path.suffix != ".md":
                 continue
             stem = path.stem
             artifact_type = next(
@@ -158,6 +170,11 @@ def discover_artifacts() -> Iterable[Artifact]:
             )
             if artifact_type is None:
                 continue
+            if path.is_symlink():
+                validate_flat_artifact(path)
+            if not path.is_file():
+                continue
+            validate_flat_artifact(path)
             artifact = artifact_from_markdown(path, artifact_type, stem)
             if artifact is not None:
                 yield artifact
@@ -171,9 +188,13 @@ def discover_artifacts() -> Iterable[Artifact]:
                 )
             if not bundle_root.is_dir() or not skill_path.exists():
                 continue
-            validate_bundle(bundle_root)
+            bundle_files = validate_bundle(bundle_root)
             artifact = artifact_from_markdown(
-                skill_path, "skill", bundle_root.name, bundle_root
+                skill_path,
+                "skill",
+                bundle_root.name,
+                bundle_root,
+                bundle_files,
             )
             if artifact is not None:
                 yield artifact
@@ -268,40 +289,29 @@ class UnsafeBundleError(ValueError):
     pass
 
 
-def validate_bundle(bundle_root: Path) -> list[str]:
-    if bundle_root.is_symlink() or not bundle_root.is_dir():
-        raise UnsafeBundleError(f"skill bundle must be a regular directory: {bundle_root}")
+class UnsafeArtifactError(UnsafeBundleError):
+    pass
+
+
+def validate_output_directory(output_dir: Path) -> None:
     try:
-        resolved_bundle = bundle_root.resolve(strict=True)
-        resolved_root = ROOT.resolve(strict=True)
-    except OSError as exc:
-        raise UnsafeBundleError(f"could not resolve skill bundle: {bundle_root}") from exc
-    if not resolved_bundle.is_relative_to(resolved_root):
-        raise UnsafeBundleError(f"skill bundle escapes the repository: {bundle_root}")
-    skill_path = bundle_root / "SKILL.md"
-    if skill_path.is_symlink() or not skill_path.is_file():
-        raise UnsafeBundleError(
-            f"skill bundle entrypoint must be a regular file: {skill_path}"
-        )
-    bundle_files: list[str] = []
-    for current, dirs, files in os.walk(bundle_root, followlinks=False):
-        dirs.sort()
-        files.sort()
-        current_path = Path(current)
-        for name in dirs:
-            entry = current_path / name
-            if entry.is_symlink() or not entry.is_dir():
-                raise UnsafeBundleError(
-                    f"skill bundle contains an unsafe directory entry: {entry}"
-                )
-        for name in files:
-            entry = current_path / name
-            if entry.is_symlink() or not entry.is_file():
-                raise UnsafeBundleError(
-                    f"skill bundle contains an unsafe file entry: {entry}"
-                )
-            bundle_files.append(entry.relative_to(bundle_root).as_posix())
-    return sorted(bundle_files)
+        validate_repository_directory(output_dir, ROOT, "lesson outputs")
+    except ArtifactPathError as error:
+        raise UnsafeArtifactError(str(error)) from error
+
+
+def validate_flat_artifact(source: Path) -> None:
+    try:
+        validate_repository_file(source, ROOT, "flat artifact")
+    except ArtifactPathError as error:
+        raise UnsafeArtifactError(str(error)) from error
+
+
+def validate_bundle(bundle_root: Path) -> list[str]:
+    try:
+        return validate_skill_bundle(bundle_root, ROOT)
+    except BundleValidationError as error:
+        raise UnsafeBundleError(str(error)) from error
 
 
 def install_bundle(bundle_root: Path, dest: Path, force: bool) -> None:
@@ -313,7 +323,16 @@ def install_bundle(bundle_root: Path, dest: Path, force: bool) -> None:
     backup_root: Path | None = None
     backup: Path | None = None
     try:
-        shutil.copytree(bundle_root, staged_bundle, copy_function=shutil.copy2)
+        shutil.copytree(
+            bundle_root,
+            staged_bundle,
+            copy_function=shutil.copy2,
+            symlinks=True,
+        )
+        try:
+            validate_skill_bundle(staged_bundle, staging_root)
+        except BundleValidationError as error:
+            raise UnsafeBundleError(str(error)) from error
         if dest.exists() or dest.is_symlink():
             if not force:
                 raise FileExistsError(f"target already exists: {dest}")
@@ -344,7 +363,9 @@ def install_bundle(bundle_root: Path, dest: Path, force: bool) -> None:
 def apply_plan(plan: Plan, force: bool = False) -> None:
     for artifact, _dest in plan.actions:
         if artifact.bundle_root is not None:
-            validate_bundle(artifact.bundle_root)
+            artifact.bundle_files = validate_bundle(artifact.bundle_root)
+        else:
+            validate_flat_artifact(artifact.source)
     for artifact, dest in plan.actions:
         if artifact.bundle_root is not None:
             install_bundle(artifact.bundle_root, dest, force)

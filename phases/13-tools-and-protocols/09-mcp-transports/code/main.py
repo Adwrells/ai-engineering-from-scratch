@@ -2,7 +2,7 @@
 Lesson: phases/13-tools-and-protocols/09-mcp-transports/docs/en.md
 Specification: https://modelcontextprotocol.io/specification/2026-07-28/
 Implements POST-only transport, header validation, JSON, and finite SSE.
-Run: python3 main.py --probe
+Run: python3 main.py
 """
 
 from __future__ import annotations
@@ -34,6 +34,9 @@ ORIGIN_ALLOWLIST = {
     "http://127.0.0.1",
     "https://client.example",
 }
+MAX_REQUEST_BYTES = 1_048_576
+READ_TIMEOUT_SECONDS = 5.0
+ROUTING_HEADERS = ("MCP-Protocol-Version", "Mcp-Method", "Mcp-Name")
 
 TOOLS = [
     {
@@ -216,6 +219,31 @@ def validate_http_headers(
             raise RpcFault(-32020, "Header mismatch: Mcp-Name")
 
 
+def reject_duplicate_routing_headers(headers: Any) -> None:
+    get_all = getattr(headers, "get_all", None)
+    if not callable(get_all):
+        return
+    for name in ROUTING_HEADERS:
+        if len(get_all(name, [])) > 1:
+            raise RpcFault(-32020, f"Duplicate routing header: {name}")
+
+
+def reject_duplicate_origin(headers: Any) -> None:
+    get_all = getattr(headers, "get_all", None)
+    if callable(get_all) and len(get_all("Origin", [])) > 1:
+        raise RpcFault(-32020, "Duplicate Origin header")
+
+
+def reject_ambiguous_body_framing(headers: Any) -> None:
+    get_all = getattr(headers, "get_all", None)
+    if not callable(get_all):
+        return
+    if len(get_all("Content-Length", [])) > 1:
+        raise ValueError("duplicate Content-Length headers are not allowed")
+    if get_all("Transfer-Encoding", []):
+        raise ValueError("Transfer-Encoding is not supported")
+
+
 def dispatch(message: dict[str, Any]) -> dict[str, Any] | None:
     if "id" not in message:
         return None
@@ -334,6 +362,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/mcp":
             self._write_json(404, {"error": "Not found"})
             return False
+        try:
+            reject_duplicate_origin(self.headers)
+        except RpcFault as fault:
+            self._write_fault(400, None, fault)
+            return False
         origin = self.headers.get("Origin")
         if not origin_allowed(origin):
             self._write_json(403, {"error": "Origin not allowed"})
@@ -373,17 +406,30 @@ class Handler(BaseHTTPRequestHandler):
             self._write_json(406, {"error": "Accept must include JSON and SSE"})
             return
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            message = json.loads(self.rfile.read(length))
+            reject_ambiguous_body_framing(self.headers)
+            raw_length = self.headers.get("Content-Length")
+            if raw_length is None:
+                raise ValueError("Content-Length is required")
+            length = int(raw_length)
+            if not 1 <= length <= MAX_REQUEST_BYTES:
+                raise ValueError(
+                    f"Content-Length must be from 1 through {MAX_REQUEST_BYTES}"
+                )
+            self.connection.settimeout(READ_TIMEOUT_SECONDS)
+            body = self.rfile.read(length)
+            if len(body) != length:
+                raise ValueError("request body ended before Content-Length bytes arrived")
+            message = json.loads(body)
             if not isinstance(message, dict):
                 raise ValueError("message must be an object")
-        except (ValueError, json.JSONDecodeError) as exc:
+        except (ValueError, json.JSONDecodeError, TimeoutError) as exc:
             self._write_json(400, rpc_error(None, -32700, "Parse error", {"detail": str(exc)}))
             return
 
         request_id = message.get("id")
         try:
             body_version = validate_request_structure(message)
+            reject_duplicate_routing_headers(self.headers)
             validate_http_headers(self.headers, message, body_version)
             validate_supported_version(body_version)
         except RpcFault as fault:
@@ -518,7 +564,7 @@ def probe() -> None:
 
 
 def main() -> None:
-    if "--probe" in sys.argv:
+    if "--serve" not in sys.argv:
         probe()
         return
     server = serve("127.0.0.1", 8017)

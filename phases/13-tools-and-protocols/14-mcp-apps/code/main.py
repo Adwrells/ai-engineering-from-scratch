@@ -1,10 +1,8 @@
 """Phase 13 Lesson 14: MCP Apps on the MCP 2026-07-28 wire.
-
-Companion to ../docs/en.md. Implements an in-process protocol model for
-server/discover, tools/list, tools/call, resources/list, and resources/read.
-Lesson 09 owns the complete Streamable HTTP adapter, including Content-Type
-and Accept validation. The UI is a self-contained HTML resource with a pinned
-postMessage origin.
+Lesson: phases/13-tools-and-protocols/14-mcp-apps/docs/en.md
+Spec: https://modelcontextprotocol.io/specification/2026-07-28
+Models discovery, tools, resources, and a self-contained MCP Apps UI.
+Lesson 09 owns the HTTP adapter; the UI pins its postMessage origin.
 """
 
 from __future__ import annotations

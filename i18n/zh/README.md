@@ -1369,15 +1369,6 @@ Sign up via [GitHub Sponsors](https://github.com/sponsors/rohitg00).
 ░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒░░░▒▒▒
 ```
 
-## Star 历史
-
-<a href="https://star-history.com/#rohitg00/ai-engineering-from-scratch&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=rohitg00/ai-engineering-from-scratch&type=Date&theme=dark">
-    <img alt="Star history" src="https://api.star-history.com/svg?repos=rohitg00/ai-engineering-from-scratch&type=Date" width="100%">
-  </picture>
-</a>
-
 If this manual helped you, star the repo. It keeps the project alive.
 
 ## 许可证

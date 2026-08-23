@@ -24,7 +24,7 @@ Given an MCP deployment, produce an evidence-based threat model. Assume any serv
 2. Descriptor review. Report poisoning indicators, full-descriptor digest changes, unknown tools, and schema or annotation changes.
 3. Namespace map. Give one qualified public name for every backend tool and reject silent collision resolution.
 4. Authorization matrix. Map authenticated principal and issuer to resource, tool, argument constraints, and scopes. Do not use `clientInfo` or `serverInfo` as identity.
-5. MRTR review. Confirm every `inputRequests` entry is a complete embedded request supported by the client's declared capability. Treat `elicitation: {}` as implicit form support and `elicitation: {form: {}}` as explicit form support. Reject URL-only elicitation with HTTP 400 `-32021` and `data.requiredCapabilities.elicitation.form`. Bind protected `requestState` to method, tool, exact arguments, principal, purpose, expiry, and nonce. Match and validate every `inputResponses` entry by key.
+5. MRTR review. Confirm every `inputRequests` entry is a complete embedded request supported by the client's declared capability. Treat `elicitation: {}` as implicit form support and `elicitation: {form: {}}` as explicit form support. Reject URL-only elicitation with HTTP 400 `-32021` and `data.requiredCapabilities.elicitation.form`. Bind protected `requestState` to method, tool, exact arguments, principal, purpose, expiry, and nonce. Match and validate every `inputResponses` entry by key before atomically consuming the nonce in a bounded, TTL-pruned replay store shared by every handler instance.
 6. Risk-axis review. Flag any automatic step that combines untrusted input, sensitive data, and consequential action.
 7. Cache and subscription review. Ensure user-dependent results are private and long-lived notifications use `subscriptions/listen`.
 8. Compatibility boundary. Isolate any older handshake, session, GET stream, server callback, or experimental task behavior behind explicit version gating.
@@ -38,6 +38,7 @@ Given an MCP deployment, produce an evidence-based threat model. Assume any serv
 - Treating self-reported client or server information as authentication.
 - Treating a declared capability as permission.
 - Trusting plaintext or unsigned `requestState` for a consequential action.
+- Keeping the only replay ledger inside one gateway or server instance.
 - Keying rate limits or approval state only by `Mcp-Session-Id`.
 - Presenting deprecated Sampling, Roots, Logging, or legacy HTTP plus SSE as the new implementation path.
 
